@@ -1,0 +1,7 @@
+*.db
+api_sample.json
+__pycache__/
+.idea/
+*.pyc
+.venv/
+venv/
