@@ -1,0 +1,44 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ru" class="v-theme--light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="description" content="«Сириус» — просветительская среда. Помощник: задайте вопрос простым языком.">
+    <title>{% block title %}Помощник{% endblock %} — «Сириус»</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{% static 'assistant/css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'assistant/css/chat-layout.css' %}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-background">
+    <div class="app-shell">
+        <header class="app-header bg-primary-surface-lighten-1">
+            <div class="app-header__inner">
+                <a href="{% url 'assistant:chat' %}" class="app-brand" aria-label="На главную">
+                    <span class="app-brand__logo">
+                        <img
+                            src="{% static 'assistant/logo.svg' %}"
+                            width="42"
+                            height="56"
+                            alt="Логотип федеральной территории «Сириус»"
+                        >
+                    </span>
+                    <span class="app-brand__text text-logo">ФЕДЕРАЛЬНАЯ<br>ТЕРРИТОРИЯ<br>«СИРИУС»</span>
+                </a>
+                <nav class="app-nav" aria-label="Основная навигация">
+                    <span class="app-nav__item app-nav__item--active text-secondary-darken-1">Помощник</span>
+                </nav>
+            </div>
+        </header>
+
+        <main class="app-main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

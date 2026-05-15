@@ -1,0 +1,117 @@
+{% extends "assistant/base.html" %}
+{% load static %}
+
+{% block title %}{% if active_chat %}{{ active_chat.title }}{% else %}Помощник{% endif %}{% endblock %}
+
+{% block content %}
+<div class="chat-workspace">
+    <aside class="chat-sidebar bg-surface" aria-label="Список чатов">
+        <div class="chat-sidebar__head">
+            <h2 class="chat-sidebar__title text-secondary">Чаты</h2>
+            <a href="{% url 'assistant:chat' %}" class="chat-sidebar__new bg-primary" title="Новый чат">
+                <span class="visually-hidden">Новый чат</span>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </a>
+        </div>
+
+        <ul class="chat-list" role="list">
+            {% for chat in chats %}
+            <li class="chat-list__item-wrap">
+                <a
+                    href="{% url 'assistant:chat' %}?chat={{ chat.id }}"
+                    class="chat-list__item{% if chat.id == active_chat_id %} chat-list__item--active{% endif %}"
+                    {% if chat.id == active_chat_id %}aria-current="page"{% endif %}
+                >
+                    <span class="chat-list__title text-secondary">{{ chat.title }}</span>
+                    <span class="chat-list__preview text-additional">{{ chat.preview }}</span>
+                    <span class="chat-list__time text-additional">{{ chat.updated }}</span>
+                </a>
+            </li>
+            {% empty %}
+            <li class="chat-list__empty text-additional">Нет чатов</li>
+            {% endfor %}
+        </ul>
+    </aside>
+
+    <section class="chat-main" aria-labelledby="chat-title">
+        <header class="chat-main__head bg-primary-surface-lighten-1">
+            <div class="chat-main__head-text">
+                <h1 id="chat-title" class="chat-main__title text-secondary">
+                    {% if active_chat %}{{ active_chat.title }}{% else %}Новый диалог{% endif %}
+                </h1>
+                <p class="chat-main__subtitle text-additional">
+                    Задайте вопрос простым языком — уточняйте ответы в диалоге
+                </p>
+            </div>
+        </header>
+
+        <div class="chat-panel bg-surface" role="region" aria-label="Диалог с помощником">
+            <div class="chat-messages bg-primary-surface-lighten-1" id="chat-messages" aria-live="polite">
+                {% if messages %}
+                <div class="chat-messages__thread">
+                    {% for message in messages %}
+                    <article class="chat-msg chat-msg--{{ message.role }}">
+                        <div class="chat-msg__meta">
+                            <span class="chat-msg__author text-additional">
+                                {% if message.role == 'user' %}Вы{% else %}Помощник{% endif %}
+                            </span>
+                            <time class="chat-msg__time text-additional">{{ message.time }}</time>
+                        </div>
+                        <div class="chat-msg__bubble{% if message.role == 'user' %} bg-secondary{% else %} bg-surface{% endif %}">
+                            {{ message.text }}
+                        </div>
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="chat-messages__empty text-additional" id="chat-empty">
+                    <svg class="chat-messages__empty-icon text-primary" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                        <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2"/>
+                        <path d="M20 28h24M20 36h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <p>Начните диалог — напишите вопрос ниже.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <form
+                class="chat-composer bg-surface"
+                id="chat-form"
+                action="{% url 'assistant:chat' %}{% if active_chat_id %}?chat={{ active_chat_id }}{% endif %}"
+                method="post"
+                novalidate
+            >
+                {% csrf_token %}
+                <div class="chat-composer__field">
+                    <label for="chat-input" class="visually-hidden">Ваш вопрос</label>
+                    <textarea
+                        id="chat-input"
+                        name="message"
+                        class="chat-composer__input"
+                        rows="1"
+                        placeholder="Напишите вопрос…"
+                        autocomplete="off"
+                        maxlength="4000"
+                        aria-describedby="chat-hint"
+                    ></textarea>
+                    <span id="chat-hint" class="chat-composer__hint text-additional">
+                        Отправка пока не обрабатывается — подключите API ассистента позже.
+                    </span>
+                </div>
+                <button type="submit" class="chat-composer__submit bg-primary" id="chat-submit" disabled>
+                    <span>Отправить</span>
+                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+            </form>
+        </div>
+    </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'assistant/js/chat.js' %}" defer></script>
+{% endblock %}
