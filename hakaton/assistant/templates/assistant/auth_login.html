@@ -1,0 +1,38 @@
+{% extends "assistant/base.html" %}
+
+{% block html_class %}v-theme--light page-auth{% endblock %}
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card bg-surface">
+        <h1 class="auth-heading text-secondary">Вход</h1>
+        {% if form.non_field_errors %}
+            <div class="auth-errors" role="alert">
+                {% for err in form.non_field_errors %}<p>{{ err }}</p>{% endfor %}
+            </div>
+        {% endif %}
+        <form method="post" class="auth-form" action="">
+            {% csrf_token %}
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_username">Имя пользователя</label>
+                {{ form.username.errors }}
+                {{ form.username }}
+            </div>
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_password">Пароль</label>
+                {{ form.password.errors }}
+                {{ form.password }}
+            </div>
+            <button type="submit" class="auth-submit bg-primary">Войти</button>
+        </form>
+        <p class="auth-foot text-additional">
+            Нет аккаунта? <a href="{% url 'assistant:register' %}" class="text-primary">Зарегистрироваться</a>
+            · <a href="{% url 'assistant:afisha' %}" class="text-secondary">На афишу</a>
+        </p>
+        <p class="auth-foot text-additional" style="margin-top: 8px;">
+            После регистрации войти можно только после перехода по ссылке из письма на почте.
+        </p>
+    </div>
+</div>
+{% endblock %}

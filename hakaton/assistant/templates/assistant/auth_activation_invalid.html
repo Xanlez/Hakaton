@@ -1,0 +1,20 @@
+{% extends "assistant/base.html" %}
+
+{% block html_class %}v-theme--light page-auth{% endblock %}
+{% block title %}Ссылка недействительна{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card bg-surface">
+        <h1 class="auth-heading text-secondary">Ссылка устарела или неверная</h1>
+        <p class="auth-foot text-secondary" style="margin-top: 0;">
+            Запросите доступ ещё раз: зарегистрируйтесь заново или войдите, если аккаунт уже подтверждён.
+        </p>
+        <p class="auth-foot text-additional">
+            <a href="{% url 'assistant:login' %}" class="text-primary">Вход</a>
+            · <a href="{% url 'assistant:register' %}" class="text-primary">Регистрация</a>
+            · <a href="{% url 'assistant:cabinet' %}" class="text-secondary">ЛК</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

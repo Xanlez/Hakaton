@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = BASE_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(REPO_ROOT / ".env")
+except ImportError:
+    pass
 
 
 # Quick-start development settings - unsuitable for production
@@ -122,3 +130,42 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+LOGIN_URL = "/accounts/login/"
+LOGIN_REDIRECT_URL = "/cabinet/"
+LOGOUT_REDIRECT_URL = "/"
+
+# Почта: DJANGO_EMAIL_* или те же имена, что в fbe-cloud (SMTP_HOST, SMTP_USER, …)
+_smtp_host = (os.environ.get("DJANGO_EMAIL_HOST") or os.environ.get("SMTP_HOST", "")).strip()
+_smtp_user = (os.environ.get("DJANGO_EMAIL_HOST_USER") or os.environ.get("SMTP_USER", "")).strip()
+_smtp_password = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+_smtp_port_raw = os.environ.get("DJANGO_EMAIL_PORT") or os.environ.get("SMTP_PORT", "587")
+_smtp_from = (
+    os.environ.get("DJANGO_DEFAULT_FROM_EMAIL")
+    or os.environ.get("SMTP_FROM", "")
+    or _smtp_user
+    or "Sirius Afisha <noreply@localhost>"
+)
+
+EMAIL_HOST = _smtp_host
+EMAIL_PORT = int(_smtp_port_raw)
+EMAIL_HOST_USER = _smtp_user
+EMAIL_HOST_PASSWORD = _smtp_password
+EMAIL_USE_TLS = os.environ.get("DJANGO_EMAIL_USE_TLS", "true").lower() in ("1", "true", "yes")
+EMAIL_USE_SSL = os.environ.get("DJANGO_EMAIL_USE_SSL", "").lower() in ("1", "true", "yes")
+
+if EMAIL_HOST and EMAIL_HOST_USER:
+    EMAIL_BACKEND = os.environ.get(
+        "DJANGO_EMAIL_BACKEND",
+        "django.core.mail.backends.smtp.EmailBackend",
+    )
+    DEFAULT_FROM_EMAIL = _smtp_from
+else:
+    EMAIL_BACKEND = os.environ.get(
+        "DJANGO_EMAIL_BACKEND",
+        "django.core.mail.backends.console.EmailBackend",
+    )
+    DEFAULT_FROM_EMAIL = (
+        os.environ.get("DJANGO_DEFAULT_FROM_EMAIL")
+        or _smtp_from
+    )

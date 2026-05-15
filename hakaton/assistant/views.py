@@ -2,10 +2,22 @@ import json
 import logging
 from pathlib import Path
 
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
+from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils import timezone as dj_tz
 from django.views.decorators.http import require_POST
 from django.views.generic import TemplateView
+
+from assistant.chat_storage import (
+    CHAT_MESSAGES_PER_THREAD_MAX,
+    get_chat_state,
+    new_thread_uid,
+    save_chat_state,
+    trim_thread_list,
+)
+from assistant.chat_threads import finalize_thread_title, last_time_label, thread_preview
+from assistant.formatting import assistant_reply_html, clean_assistant_visible
 
 logger = logging.getLogger(__name__)
 
@@ -19,26 +31,257 @@ def _backend_db_path() -> str:
     return str(p if p.is_absolute() else _REPO_ROOT / DB_PATH)
 
 
-class ChatView(TemplateView):
-    """Чат на сайте: ответы приходят через /api/chat/ (GigaChat + SQLite афиша)."""
+def _events_for_template(db_path: str) -> list[dict]:
+    from database import event_time, init_db
 
-    template_name = "assistant/chat.html"
+    conn = init_db(db_path)
+    rows = conn.execute(
+        """SELECT event_id, event_name, event_start_date, event_start_time, event_end_time,
+                  is_all_day, afisha_type_name, event_place, image_url, event_description
+           FROM events
+           ORDER BY event_start_date, event_start_time, event_id"""
+    ).fetchall()
+    conn.close()
+    out: list[dict] = []
+    for r in rows:
+        slot = event_time(r)
+        desc_full = ""
+        preview = ""
+        if "event_description" in r.keys():
+            desc_full = (r["event_description"] or "").strip()
+        if desc_full:
+            one_line = desc_full.replace("\n", " ").replace("\r", " ")
+            preview = one_line[:200] + ("…" if len(one_line) > 200 else "")
+        out.append({
+            "event_id": r["event_id"],
+            "event_name": r["event_name"],
+            "event_start_date": r["event_start_date"] or "—",
+            "time_slot": slot,
+            "afisha_type_name": (r["afisha_type_name"] or "").strip(),
+            "event_place": (r["event_place"] or "").strip(),
+            "image_url": (r["image_url"] or "").strip(),
+            "event_description_preview": preview,
+            "has_description": bool(desc_full),
+        })
+    return out
+
+
+def _event_detail_dict(db_path: str, event_id: int) -> dict | None:
+    from database import event_time, init_db
+
+    conn = init_db(db_path)
+    row = conn.execute(
+        "SELECT * FROM events WHERE event_id = ?",
+        (event_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    slot = event_time(row)
+    if row["is_all_day"]:
+        time_display = "Весь день"
+    elif slot == "all-day":
+        time_display = "Весь день"
+    else:
+        time_display = slot
+    desc = ""
+    if "event_description" in row.keys():
+        desc = (row["event_description"] or "").strip()
+    return {
+        "event_id": row["event_id"],
+        "event_name": row["event_name"],
+        "afisha_type_name": (row["afisha_type_name"] or "").strip(),
+        "event_start_date": row["event_start_date"] or "—",
+        "event_start_time": row["event_start_time"] or "",
+        "event_end_time": row["event_end_time"] or "",
+        "is_all_day": bool(row["is_all_day"]),
+        "time_display": time_display,
+        "event_place": (row["event_place"] or "").strip(),
+        "image_url": (row["image_url"] or "").strip(),
+        "event_description": desc,
+        "has_description": bool(desc),
+    }
+
+
+
+
+def _chat_time_labels() -> tuple[str, str]:
+    label = dj_tz.localtime(dj_tz.now()).strftime("%H:%M")
+    return label, label
+
+
+def _append_turn_to_thread(request, thread_id: str, user_text: str, assistant_text: str) -> None:
+    state = get_chat_state(request)
+    if thread_id not in state["threads"]:
+        return
+    thread = state["threads"][thread_id]
+    msgs = list(thread.get("messages") or [])
+    tu, ta = _chat_time_labels()
+    msgs.append({"role": "user", "text": user_text, "time": tu})
+    clean_ai = (
+        clean_assistant_visible(assistant_text) if (assistant_text or "").strip() else assistant_text
+    )
+    msgs.append({"role": "assistant", "text": clean_ai, "time": ta})
+    overflow = len(msgs) - CHAT_MESSAGES_PER_THREAD_MAX
+    if overflow > 0:
+        msgs = msgs[overflow:]
+    thread["messages"] = msgs
+    finalize_thread_title(thread, msgs)
+    state["order"] = [thread_id] + [x for x in state["order"] if x != thread_id]
+    state["active_id"] = thread_id
+    trim_thread_list(state)
+    save_chat_state(request, state)
+
+
+class AfishaView(TemplateView):
+    template_name = "assistant/afisha.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        chats = [
-            {
-                "id": "live",
-                "title": "Афиша «Сириус»",
-                "preview": "Рекомендации из вашей локальной базы событий",
-                "updated": "",
-            },
-        ]
-        context["chats"] = chats
-        context["active_chat"] = chats[0]
-        context["active_chat_id"] = "live"
-        context["messages"] = []
+        context["nav_section"] = "afisha"
+        db_path = _backend_db_path()
+        try:
+            from chat import ensure_db
+
+            ensure_db(db_path, force=False)
+        except (RuntimeError, ValueError) as e:
+            context["events"] = []
+            context["afisha_error"] = str(e)
+            return context
+        context["events"] = _events_for_template(db_path)
+        return context
+
+
+class EventDetailView(TemplateView):
+    template_name = "assistant/event_detail.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["nav_section"] = "afisha"
+        db_path = _backend_db_path()
+        try:
+            from chat import ensure_db
+
+            ensure_db(db_path, force=False)
+        except (RuntimeError, ValueError) as e:
+            raise Http404("База афиши недоступна") from e
+        event = _event_detail_dict(db_path, int(kwargs["event_id"]))
+        if event is None:
+            raise Http404("Мероприятие не найдено")
+        context["event"] = event
+        return context
+
+
+class ChatView(TemplateView):
+    """Несколько чатов (вкладки в боковой панели), хранение в сессии."""
+
+    template_name = "assistant/chat.html"
+
+    def get(self, request, *args, **kwargs):
+        ev_raw = request.GET.get("event")
+        if ev_raw is not None and str(ev_raw).strip() != "":
+            try:
+                eid = int(ev_raw)
+                if eid < 1:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return redirect("assistant:chat")
+
+            db_path = _backend_db_path()
+            try:
+                from chat import ensure_db
+
+                ensure_db(db_path, force=False)
+            except (RuntimeError, ValueError):
+                return redirect("assistant:chat")
+
+            from database import fetch_event_by_id
+
+            row = fetch_event_by_id(db_path, eid)
+            if row is None:
+                return redirect("assistant:afisha")
+
+            state = get_chat_state(request)
+            tid = new_thread_uid()
+            while tid in state["threads"]:
+                tid = new_thread_uid()
+
+            event_name = (row["event_name"] or "").strip() or f"Событие #{eid}"
+            intro = ""
+            try:
+                from gigachat_advisor import introduce_event
+
+                intro = introduce_event(db_path, eid)
+            except Exception as ex:
+                logger.warning("introduce_event failed: %s", ex)
+                from gigachat_advisor import fallback_event_intro
+
+                intro = fallback_event_intro(row)
+            intro = clean_assistant_visible(intro)
+
+            t_intro = dj_tz.localtime(dj_tz.now()).strftime("%H:%M")
+            thread = {
+                "title": "Новый чат",
+                "messages": [{"role": "assistant", "text": intro, "time": t_intro}],
+                "focus_event_id": eid,
+                "event_title_hint": event_name,
+            }
+            finalize_thread_title(thread, thread["messages"])
+            state["threads"][tid] = thread
+            state["order"].insert(0, tid)
+            state["active_id"] = tid
+            trim_thread_list(state)
+            save_chat_state(request, state)
+            return redirect(f"{reverse('assistant:chat')}?chat={tid}")
+
+        if request.GET.get("new"):
+            state = get_chat_state(request)
+            tid = new_thread_uid()
+            while tid in state["threads"]:
+                tid = new_thread_uid()
+            state["threads"][tid] = {"title": "Новый чат", "messages": []}
+            state["order"].insert(0, tid)
+            state["active_id"] = tid
+            trim_thread_list(state)
+            save_chat_state(request, state)
+            return redirect(f"{reverse('assistant:chat')}?chat={tid}")
+
+        state = get_chat_state(request)
+        chat_param = request.GET.get("chat")
+        if chat_param and chat_param in state["threads"]:
+            if state["active_id"] != chat_param:
+                state["active_id"] = chat_param
+                save_chat_state(request, state)
+        if state["active_id"] not in state["threads"]:
+            state["active_id"] = state["order"][0]
+            save_chat_state(request, state)
+        return super().get(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["nav_section"] = "chat"
+        state = get_chat_state(self.request)
+        active_id = state["active_id"]
+        thread = state["threads"][active_id]
+
+        chats_sidebar: list[dict] = []
+        for tid in state["order"]:
+            t = state["threads"][tid]
+            chats_sidebar.append({
+                "id": tid,
+                "title": t.get("title") or "Новый чат",
+                "preview": thread_preview(t),
+                "updated": last_time_label(t),
+            })
+
+        context["chats"] = chats_sidebar
+        context["active_chat_id"] = active_id
+        context["chat_messages"] = list(thread.get("messages") or [])
+        context["active_chat"] = {"title": thread.get("title") or "Чат"}
+        context["thread_focus_event_id"] = thread.get("focus_event_id")
         context["chat_api_url"] = reverse("assistant:api_chat")
+        context["chat_clear_url"] = reverse("assistant:chat_clear")
+        context["chat_new_url"] = f"{reverse('assistant:chat')}?new=1"
         return context
 
 
@@ -50,6 +293,12 @@ def chat_api(request):
         return JsonResponse({"error": "Неверный JSON"}, status=400)
 
     message = (data.get("message") or "").strip()
+    chat_id = (data.get("chat_id") or "").strip()
+
+    state = get_chat_state(request)
+    if not chat_id or chat_id not in state["threads"]:
+        return JsonResponse({"error": "Неизвестный чат"}, status=400)
+
     if not message:
         return JsonResponse({"error": "Введите вопрос"}, status=400)
 
@@ -59,14 +308,85 @@ def chat_api(request):
 
         ensure_db(db_path, force=False)
     except (RuntimeError, ValueError) as e:
-        return JsonResponse({"error": str(e)}, status=400)
+        err_msg = str(e)
+        _append_turn_to_thread(request, chat_id, message, err_msg)
+        clean_err = clean_assistant_visible(err_msg)
+        return JsonResponse(
+            {
+                "error": clean_err,
+                "reply": clean_err,
+                "reply_html": str(assistant_reply_html(clean_err)),
+            },
+            status=400,
+        )
 
     try:
-        from gigachat_advisor import recommend_events
+        focus = state["threads"][chat_id].get("focus_event_id")
+        prior = [
+            {"role": m["role"], "text": m["text"]}
+            for m in state["threads"][chat_id].get("messages", [])
+        ]
+        if focus is not None:
+            from gigachat_advisor import chat_about_event
 
-        reply = recommend_events(message, db_path)
+            reply = chat_about_event(message, db_path, int(focus), prior)
+        else:
+            from gigachat_advisor import recommend_events
+
+            reply = recommend_events(message, db_path)
     except Exception as e:
         logger.exception("chat_api")
-        return JsonResponse({"error": str(e)}, status=500)
+        err_msg = str(e)
+        _append_turn_to_thread(request, chat_id, message, err_msg)
+        clean_err = clean_assistant_visible(err_msg)
+        return JsonResponse(
+            {
+                "error": clean_err,
+                "reply": clean_err,
+                "reply_html": str(assistant_reply_html(clean_err)),
+            },
+            status=500,
+        )
 
-    return JsonResponse({"reply": reply})
+    clean = clean_assistant_visible(reply)
+    _append_turn_to_thread(request, chat_id, message, clean)
+    return JsonResponse({
+        "reply": clean,
+        "reply_html": str(assistant_reply_html(clean)),
+    })
+
+
+@require_POST
+def chat_clear(request):
+    state = get_chat_state(request)
+    tid = (request.POST.get("thread_id") or "").strip() or state["active_id"]
+    if tid in state["threads"]:
+        t = state["threads"][tid]
+        t["messages"] = []
+        finalize_thread_title(t, [])
+        save_chat_state(request, state)
+    return redirect(f"{reverse('assistant:chat')}?chat={tid}")
+
+
+@require_POST
+def chat_delete_thread(request, thread_id: str):
+    state = get_chat_state(request)
+    thread_id = (thread_id or "").strip()
+    if thread_id not in state["threads"]:
+        return redirect("assistant:chat")
+
+    del state["threads"][thread_id]
+    state["order"] = [x for x in state["order"] if x != thread_id]
+
+    if not state["order"]:
+        tid = new_thread_uid()
+        state["order"] = [tid]
+        state["threads"][tid] = {"title": "Новый чат", "messages": []}
+        state["active_id"] = tid
+    elif state["active_id"] == thread_id:
+        state["active_id"] = state["order"][0]
+    elif state["active_id"] not in state["threads"]:
+        state["active_id"] = state["order"][0]
+
+    save_chat_state(request, state)
+    return redirect(f"{reverse('assistant:chat')}?chat={state['active_id']}")

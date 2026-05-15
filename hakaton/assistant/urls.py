@@ -1,10 +1,20 @@
 from django.urls import path
 
-from . import views
+from . import auth_views, views
 
 app_name = 'assistant'
 
 urlpatterns = [
-    path('', views.ChatView.as_view(), name='chat'),
+    path('', views.AfishaView.as_view(), name='afisha'),
+    path('event/<int:event_id>/', views.EventDetailView.as_view(), name='event_detail'),
+    path('chat/thread/<str:thread_id>/delete/', views.chat_delete_thread, name='chat_delete'),
+    path('chat/clear/', views.chat_clear, name='chat_clear'),
+    path('chat/', views.ChatView.as_view(), name='chat'),
     path('api/chat/', views.chat_api, name='api_chat'),
+    path('cabinet/', auth_views.CabinetView.as_view(), name='cabinet'),
+    path('accounts/register/done/', auth_views.AuthRegisterDoneView.as_view(), name='register_done'),
+    path('accounts/activate/<str:uidb64>/<str:token>/', auth_views.activate_account, name='activate'),
+    path('accounts/login/', auth_views.AuthLoginView.as_view(), name='login'),
+    path('accounts/register/', auth_views.AuthRegisterView.as_view(), name='register'),
+    path('accounts/logout/', auth_views.AuthLogoutView.as_view(), name='logout'),
 ]

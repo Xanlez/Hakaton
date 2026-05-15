@@ -1,0 +1,65 @@
+{% extends "assistant/base.html" %}
+
+{% block title %}{{ event.event_name }}{% endblock %}
+
+{% block meta_description %}{{ event.event_name }} — событие на территории «Сириус».{% endblock %}
+
+{% block content %}
+<div class="event-detail-wrap afisha-wrap">
+    <p class="event-detail-back">
+        <a href="{% url 'assistant:afisha' %}" class="chat-back-link text-additional">← К афише</a>
+    </p>
+
+    <p class="event-detail-actions">
+        <a href="{% url 'assistant:chat' %}?event={{ event.event_id }}" class="event-detail-chat-cta bg-primary">
+            Обсудить с помощником
+        </a>
+        <span class="event-detail-actions__hint text-additional">
+            Откроется чат с кратким рассказом по карточке и ответами только про это мероприятие — без технических кодов.</span>
+    </p>
+
+    <article class="event-detail bg-surface">
+        {% if event.image_url %}
+            <div class="event-detail__media">
+                <img src="{{ event.image_url }}" alt="" loading="lazy" decoding="async">
+            </div>
+        {% endif %}
+        <div class="event-detail__body">
+            {% if event.afisha_type_name %}
+                <p class="event-card__meta">{{ event.afisha_type_name }}</p>
+            {% endif %}
+            <h1 class="event-detail__title">{{ event.event_name }}</h1>
+
+            <dl class="event-detail__facts">
+                <div class="event-detail__row">
+                    <dt>Дата</dt>
+                    <dd>{{ event.event_start_date }}</dd>
+                </div>
+                <div class="event-detail__row">
+                    <dt>Время</dt>
+                    <dd>
+                        {% if event.is_all_day %}Весь день{% else %}{{ event.time_display }}{% endif %}
+                    </dd>
+                </div>
+                {% if event.event_place %}
+                    <div class="event-detail__row">
+                        <dt>Место</dt>
+                        <dd>{{ event.event_place }}</dd>
+                    </div>
+                {% endif %}
+            </dl>
+
+            {% if event.has_description %}
+                <div class="event-detail__prose-wrap">
+                    <h2 class="event-detail__prose-heading text-secondary">О событии</h2>
+                    <div class="event-detail__prose">{{ event.event_description }}</div>
+                </div>
+            {% else %}
+                <p class="event-detail__no-desc text-additional">
+                    Полного описания пока нет в загруженных данных — узнать подробности можно через «Обсудить с помощником» или по блоку выше.
+                </p>
+            {% endif %}
+        </div>
+    </article>
+</div>
+{% endblock %}

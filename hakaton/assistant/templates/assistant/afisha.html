@@ -1,0 +1,67 @@
+{% extends "assistant/base.html" %}
+
+{% block title %}Афиша{% endblock %}
+
+{% block meta_description %}Календарь мероприятий и событий на федеральной территории «Сириус».{% endblock %}
+
+{% block content %}
+<div class="afisha-wrap">
+    <header class="afisha-head">
+        <h1>Афиша мероприятий</h1>
+        <p>События из синхронизированной локальной базы. «Подробнее в чате» — диалог с помощником по карточке события.</p>
+    </header>
+
+    {% if afisha_error %}
+        <div class="afisha-empty bg-surface">
+            <p class="text-secondary">Не удалось подготовить афишу: {{ afisha_error }}</p>
+        </div>
+    {% elif not events %}
+        <div class="afisha-empty bg-surface">
+            <p class="text-secondary">Пока нет событий в базе. Заполните её командой синхронизации из корня проекта.</p>
+            <p class="text-additional"><code>python main.py --once</code></p>
+        </div>
+    {% else %}
+        <div class="events-grid">
+            {% for ev in events %}
+                <article class="event-card bg-surface">
+                    {% if ev.image_url %}
+                        <div class="event-card__media">
+                            <img src="{{ ev.image_url }}" alt="" loading="lazy" decoding="async">
+                        </div>
+                    {% else %}
+                        <div class="event-card__media" aria-hidden="true"></div>
+                    {% endif %}
+                    <div class="event-card__body">
+                        {% if ev.afisha_type_name %}
+                            <span class="event-card__meta">{{ ev.afisha_type_name }}</span>
+                        {% endif %}
+                        <h2 class="event-card__title">{{ ev.event_name }}</h2>
+                        <div class="event-card__when">
+                            {{ ev.event_start_date }}
+                            {% if ev.time_slot and ev.time_slot != "all-day" %}
+                                · {{ ev.time_slot }}
+                            {% elif ev.time_slot == "all-day" %}
+                                · весь день
+                            {% endif %}
+                        </div>
+                        {% if ev.event_place %}
+                            <div class="event-card__place">{{ ev.event_place }}</div>
+                        {% endif %}
+                        {% if ev.event_description_preview %}
+                            <p class="event-card__desc text-additional">{{ ev.event_description_preview }}</p>
+                        {% endif %}
+                        <div class="event-card__footer event-card__footer--split">
+                            <a href="{% url 'assistant:chat' %}?event={{ ev.event_id }}" class="event-card__more bg-primary">
+                                Подробнее в чате
+                            </a>
+                            <a href="{% url 'assistant:event_detail' ev.event_id %}" class="event-card__secondary">
+                                Карточка
+                            </a>
+                        </div>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

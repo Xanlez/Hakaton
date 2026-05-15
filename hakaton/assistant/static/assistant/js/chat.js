@@ -13,7 +13,8 @@
     }
 
     const apiUrl = form.dataset.chatApi;
-    if (!apiUrl) {
+    const chatId = (form.dataset.chatId || "").trim();
+    if (!apiUrl || !chatId) {
         return;
     }
 
@@ -49,7 +50,8 @@
         return thread;
     }
 
-    function appendMessage(role, text, timeStr) {
+    function appendMessage(role, text, timeStr, options) {
+        const opts = options || {};
         const thread = ensureThread();
         const article = document.createElement("article");
         article.className = "chat-msg chat-msg--" + role;
@@ -70,10 +72,17 @@
         meta.appendChild(timeEl);
 
         const bubble = document.createElement("div");
-        bubble.className =
+        let bubbleClass =
             "chat-msg__bubble" + (role === "user" ? " bg-secondary" : " bg-surface");
-        bubble.style.whiteSpace = "pre-wrap";
-        bubble.textContent = text;
+        if (opts.richHtml && role !== "user") {
+            bubbleClass += " chat-msg__bubble--rich";
+        }
+        bubble.className = bubbleClass;
+        if (opts.richHtml && role !== "user") {
+            bubble.innerHTML = opts.richHtml;
+        } else {
+            bubble.textContent = text;
+        }
 
         article.appendChild(meta);
         article.appendChild(bubble);
@@ -83,22 +92,7 @@
         return bubble;
     }
 
-    input.addEventListener("input", function () {
-        syncSubmitState();
-        resizeInput();
-    });
-
-    suggestions.forEach(function (btn) {
-        btn.addEventListener("click", function () {
-            input.value = btn.textContent.trim();
-            syncSubmitState();
-            resizeInput();
-            input.focus();
-        });
-    });
-
-    form.addEventListener("submit", function (event) {
-        event.preventDefault();
+    function sendChat() {
         const text = input.value.trim();
         if (!text || submit.disabled) {
             return;
@@ -118,11 +112,12 @@
 
         fetch(apiUrl, {
             method: "POST",
+            credentials: "same-origin",
             headers: {
                 "Content-Type": "application/json",
                 "X-CSRFToken": token,
             },
-            body: JSON.stringify({ message: text }),
+            body: JSON.stringify({ message: text, chat_id: chatId }),
         })
             .then(function (res) {
                 return res.json().then(function (body) {
@@ -131,10 +126,21 @@
             })
             .then(function (r) {
                 if (r.ok && r.body.reply !== undefined) {
-                    loadingBubble.textContent = r.body.reply;
+                    if (r.body.reply_html) {
+                        loadingBubble.classList.add("chat-msg__bubble--rich");
+                        loadingBubble.innerHTML = r.body.reply_html;
+                    } else {
+                        loadingBubble.textContent = r.body.reply;
+                    }
                 } else {
-                    loadingBubble.textContent =
+                    const errText =
                         r.body.error || "Не удалось получить ответ.";
+                    if (r.body.reply_html) {
+                        loadingBubble.classList.add("chat-msg__bubble--rich");
+                        loadingBubble.innerHTML = r.body.reply_html;
+                    } else {
+                        loadingBubble.textContent = errText;
+                    }
                 }
             })
             .catch(function () {
@@ -144,6 +150,39 @@
                 submit.disabled = !input.value.trim();
                 messagesRoot.scrollTop = messagesRoot.scrollHeight;
             });
+    }
+
+    input.addEventListener("input", function () {
+        syncSubmitState();
+        resizeInput();
+    });
+
+    input.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter") {
+            return;
+        }
+        if (event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) {
+            return;
+        }
+        if (event.isComposing) {
+            return;
+        }
+        event.preventDefault();
+        sendChat();
+    });
+
+    suggestions.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            input.value = btn.textContent.trim();
+            syncSubmitState();
+            resizeInput();
+            input.focus();
+        });
+    });
+
+    form.addEventListener("submit", function (event) {
+        event.preventDefault();
+        sendChat();
     });
 
     syncSubmitState();

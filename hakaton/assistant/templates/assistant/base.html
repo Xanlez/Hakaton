@@ -1,11 +1,11 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="ru" class="v-theme--light">
+<html lang="ru" class="{% block html_class %}v-theme--light{% endblock %}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <meta name="description" content="«Сириус» — просветительская среда. Помощник: задайте вопрос простым языком.">
-    <title>{% block title %}Помощник{% endblock %} — «Сириус»</title>
+    <meta name="description" content="{% block meta_description %}Афиша и помощник по событиям федеральной территории «Сириус».{% endblock %}">
+    <title>{% block title %}Афиша{% endblock %} — «Сириус»</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -13,31 +13,74 @@
     <link rel="stylesheet" href="{% static 'assistant/css/chat-layout.css' %}">
     {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-background">
+<body class="{% block body_class %}bg-background{% endblock %}">
     <div class="app-shell">
         <header class="app-header bg-primary-surface-lighten-1">
             <div class="app-header__inner">
-                <a href="{% url 'assistant:chat' %}" class="app-brand" aria-label="На главную">
-                    <span class="app-brand__logo">
-                        <img
-                            src="{% static 'assistant/logo.svg' %}"
-                            width="42"
-                            height="56"
-                            alt="Логотип федеральной территории «Сириус»"
-                        >
-                    </span>
-                    <span class="app-brand__text text-logo">ФЕДЕРАЛЬНАЯ<br>ТЕРРИТОРИЯ<br>«СИРИУС»</span>
-                </a>
+                <div class="app-header__lead">
+                    <a href="{% url 'assistant:afisha' %}" class="app-brand" aria-label="На главную — афиша">
+                        <span class="app-brand__logo">
+                            <img
+                                src="{% static 'assistant/logo.svg' %}"
+                                width="42"
+                                height="56"
+                                alt="Логотип федеральной территории «Сириус»"
+                            >
+                        </span>
+                        <span class="app-brand__text text-logo">ФЕДЕРАЛЬНАЯ<br>ТЕРРИТОРИЯ<br>«СИРИУС»</span>
+                    </a>
+                </div>
                 <nav class="app-nav" aria-label="Основная навигация">
-                    <span class="app-nav__item app-nav__item--active text-secondary-darken-1">Помощник</span>
+                    {% with section=nav_section|default:"afisha" %}
+                        <a href="{% url 'assistant:afisha' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'afisha' %} app-nav__item--active{% endif %}">
+                            Афиша
+                        </a>
+                        <a href="{% url 'assistant:chat' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'chat' %} app-nav__item--active{% endif %}">
+                            Чат
+                        </a>
+                        {% if user.is_authenticated %}
+                        <a href="{% url 'assistant:cabinet' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'cabinet' %} app-nav__item--active{% endif %}" title="Личный кабинет" aria-label="Личный кабинет">
+                            ЛК
+                        </a>
+                        <form method="post" action="{% url 'assistant:logout' %}" class="app-nav__logout-form">
+                            {% csrf_token %}
+                            <button type="submit" class="app-nav__item app-nav__link app-nav__logout text-secondary-darken-1">Выйти</button>
+                        </form>
+                        {% else %}
+                        <a href="{% url 'assistant:cabinet' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'cabinet' or section == 'login' or section == 'register' %} app-nav__item--active{% endif %}" title="Вход и регистрация — личный кабинет" aria-label="Личный кабинет">
+                            ЛК
+                        </a>
+                        {% endif %}
+                    {% endwith %}
                 </nav>
             </div>
         </header>
 
         <main class="app-main">
+            {% if messages %}
+            <div class="app-flash" role="status" aria-live="polite">
+                {% for message in messages %}
+                <div class="app-flash__item app-flash__item--{{ message.tags }} text-secondary">{{ message }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
             {% block content %}{% endblock %}
         </main>
     </div>
+
+    {% with section=nav_section|default:"afisha" %}
+    {% if section != "chat" %}
+    <a href="{% url 'assistant:chat' %}" class="chat-fab" title="Открыть чат с помощником по афише" aria-label="Открыть чат с помощником">
+        <svg class="chat-fab__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M7.9 20A9 9 0 104 16.5L3 21l4.9-1z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="9" cy="12" r="1" fill="currentColor"/>
+            <circle cx="12" cy="12" r="1" fill="currentColor"/>
+            <circle cx="15" cy="12" r="1" fill="currentColor"/>
+        </svg>
+        <span>Чат</span>
+    </a>
+    {% endif %}
+    {% endwith %}
 
     {% block extra_js %}{% endblock %}
 </body>

@@ -1,0 +1,44 @@
+{% extends "assistant/base.html" %}
+
+{% block html_class %}v-theme--light page-auth{% endblock %}
+{% block title %}Регистрация{% endblock %}
+
+{% block content %}
+<div class="auth-shell">
+    <div class="auth-card bg-surface">
+        <h1 class="auth-heading text-secondary">Регистрация</h1>
+        {% if form.non_field_errors %}
+            <div class="auth-errors" role="alert">
+                {% for err in form.non_field_errors %}<p>{{ err }}</p>{% endfor %}
+            </div>
+        {% endif %}
+        <form method="post" class="auth-form" action="">
+            {% csrf_token %}
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_username">Имя пользователя</label>
+                {{ form.username.errors }}
+                {{ form.username }}
+            </div>
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_email">Электронная почта</label>
+                {{ form.email.errors }}
+                {{ form.email }}
+            </div>
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_password1">Пароль</label>
+                {{ form.password1.errors }}
+                {{ form.password1 }}
+            </div>
+            <div class="auth-field">
+                <label class="auth-label text-additional" for="id_password2">Пароль ещё раз</label>
+                {{ form.password2.errors }}
+                {{ form.password2 }}
+            </div>
+            <button type="submit" class="auth-submit bg-primary">Создать аккаунт</button>
+        </form>
+        <p class="auth-foot text-additional">
+            Уже есть аккаунт? <a href="{% url 'assistant:login' %}" class="text-primary">Войти</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

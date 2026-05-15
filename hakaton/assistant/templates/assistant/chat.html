@@ -1,14 +1,19 @@
 {% extends "assistant/base.html" %}
 {% load static %}
+{% load chat_display %}
 
-{% block title %}{% if active_chat %}{{ active_chat.title }}{% else %}Помощник{% endif %}{% endblock %}
+{% block html_class %}v-theme--light page-chat{% endblock %}
+
+{% block title %}Помощник{% endblock %}
+
+{% block meta_description %}Диалоговый помощник по афише «Сириус» на базе GigaChat.{% endblock %}
 
 {% block content %}
 <div class="chat-workspace">
     <aside class="chat-sidebar bg-surface" aria-label="Список чатов">
         <div class="chat-sidebar__head">
             <h2 class="chat-sidebar__title text-secondary">Чаты</h2>
-            <a href="{% url 'assistant:chat' %}" class="chat-sidebar__new bg-primary" title="Новый чат">
+            <a href="{{ chat_new_url }}" class="chat-sidebar__new bg-primary" title="Новый чат">
                 <span class="visually-hidden">Новый чат</span>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -17,17 +22,33 @@
         </div>
 
         <ul class="chat-list" role="list">
-            {% for chat in chats %}
+            {% for c in chats %}
             <li class="chat-list__item-wrap">
-                <a
-                    href="{% url 'assistant:chat' %}?chat={{ chat.id }}"
-                    class="chat-list__item{% if chat.id == active_chat_id %} chat-list__item--active{% endif %}"
-                    {% if chat.id == active_chat_id %}aria-current="page"{% endif %}
-                >
-                    <span class="chat-list__title text-secondary">{{ chat.title }}</span>
-                    <span class="chat-list__preview text-additional">{{ chat.preview }}</span>
-                    <span class="chat-list__time text-additional">{{ chat.updated }}</span>
-                </a>
+                <div class="chat-list__row{% if c.id == active_chat_id %} chat-list__row--active{% endif %}">
+                    <a
+                        href="{% url 'assistant:chat' %}?chat={{ c.id }}"
+                        class="chat-list__item{% if c.id == active_chat_id %} chat-list__item--active{% endif %}"
+                        {% if c.id == active_chat_id %}aria-current="page"{% endif %}
+                    >
+                        <span class="chat-list__title text-secondary">{{ c.title }}</span>
+                        {% if c.preview %}
+                            <span class="chat-list__preview text-additional">{{ c.preview }}</span>
+                        {% else %}
+                            <span class="chat-list__preview text-additional">Пока без сообщений</span>
+                        {% endif %}
+                        {% if c.updated %}
+                            <span class="chat-list__time text-additional">{{ c.updated }}</span>
+                        {% endif %}
+                    </a>
+                    <form method="post" action="{% url 'assistant:chat_delete' c.id %}" class="chat-list__delete-form" title="Удалить чат" onclick="event.stopPropagation();">
+                        {% csrf_token %}
+                        <button type="submit" class="chat-list__delete" aria-label="Удалить чат «{{ c.title }}»">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </form>
+                </div>
             </li>
             {% empty %}
             <li class="chat-list__empty text-additional">Нет чатов</li>
@@ -37,21 +58,40 @@
 
     <section class="chat-main" aria-labelledby="chat-title">
         <header class="chat-main__head bg-primary-surface-lighten-1">
-            <div class="chat-main__head-text">
+            <div class="chat-main__head-main">
+                <a href="{% url 'assistant:afisha' %}" class="chat-back-link text-additional">← К афише</a>
                 <h1 id="chat-title" class="chat-main__title text-secondary">
-                    {% if active_chat %}{{ active_chat.title }}{% else %}Новый диалог{% endif %}
+                    {% if active_chat %}{{ active_chat.title }}{% else %}Помощник{% endif %}
                 </h1>
                 <p class="chat-main__subtitle text-additional">
-                    Задайте вопрос простым языком — уточняйте ответы в диалоге
+                    {% if thread_focus_event_id %}
+                        Ответы только по карточке этого мероприятия (дата, место и описание из афиши). Переключение чатов — слева.
+                    {% else %}
+                        {% if user.is_authenticated %}
+                            Общий поиск по афише. Диалоги сохраняются в вашем аккаунте.
+                        {% else %}
+                            Общий поиск по афише. Несколько диалогов — слева; без входа история хранится только в сессии браузера.
+                            <a href="{% url 'assistant:cabinet' %}" class="text-primary">Войдите</a>, чтобы сохранять чаты.
+                        {% endif %}
+                    {% endif %}
                 </p>
+            </div>
+            <div class="chat-main__head-actions chat-main__head-actions--split">
+                <form method="post" action="{{ chat_clear_url }}" class="chat-head-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="thread_id" value="{{ active_chat_id }}">
+                    <button type="submit" class="chat-clear-btn" aria-label="Очистить сообщения в этом чате">
+                        Очистить чат
+                    </button>
+                </form>
             </div>
         </header>
 
         <div class="chat-panel bg-surface" role="region" aria-label="Диалог с помощником">
             <div class="chat-messages bg-primary-surface-lighten-1" id="chat-messages" aria-live="polite">
-                {% if messages %}
+                {% if chat_messages %}
                 <div class="chat-messages__thread">
-                    {% for message in messages %}
+                    {% for message in chat_messages %}
                     <article class="chat-msg chat-msg--{{ message.role }}">
                         <div class="chat-msg__meta">
                             <span class="chat-msg__author text-additional">
@@ -59,9 +99,7 @@
                             </span>
                             <time class="chat-msg__time text-additional">{{ message.time }}</time>
                         </div>
-                        <div class="chat-msg__bubble{% if message.role == 'user' %} bg-secondary{% else %} bg-surface{% endif %}">
-                            {{ message.text }}
-                        </div>
+                        <div class="chat-msg__bubble{% if message.role == 'user' %} bg-secondary{% else %} bg-surface chat-msg__bubble--rich{% endif %}">{% if message.role == 'user' %}{{ message.text }}{% else %}{{ message.text|assistant_bubble_html }}{% endif %}</div>
                     </article>
                     {% endfor %}
                 </div>
@@ -71,7 +109,7 @@
                         <circle cx="32" cy="32" r="28" stroke="currentColor" stroke-width="2"/>
                         <path d="M20 28h24M20 36h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
-                    <p>Начните диалог — напишите вопрос ниже.</p>
+                    <p>Напишите вопрос ниже — например, «что в эти выходные?» или «лекции про науку».</p>
                 </div>
                 {% endif %}
             </div>
@@ -80,7 +118,8 @@
                 class="chat-composer bg-surface"
                 id="chat-form"
                 data-chat-api="{{ chat_api_url }}"
-                action="{% url 'assistant:chat' %}{% if active_chat_id %}?chat={{ active_chat_id }}{% endif %}"
+                data-chat-id="{{ active_chat_id }}"
+                action="{% url 'assistant:chat' %}?chat={{ active_chat_id }}"
                 method="post"
                 novalidate
             >
@@ -98,7 +137,12 @@
                         aria-describedby="chat-hint"
                     ></textarea>
                     <span id="chat-hint" class="chat-composer__hint text-additional">
-                        Ответ строится по данным локальной базы афиши и GigaChat (как в python chat.py).
+                        Enter — отправить, Shift+Enter — новая строка.
+                        {% if thread_focus_event_id %}
+                            Ответы только по карточке этого мероприятия.
+                        {% else %}
+                            Ответ по полному списку афиши и GigaChat.
+                        {% endif %}
                     </span>
                 </div>
                 <button type="submit" class="chat-composer__submit bg-primary" id="chat-submit" disabled>
