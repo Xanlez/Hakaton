@@ -6,6 +6,7 @@ from config import API_URL
 
 
 def fetch_event_list(body: dict | None = None, timeout: int = 30) -> dict:
+    """POST /api/afisha/event/list и возврат распарсенного JSON."""
     payload = json.dumps(body or {}).encode("utf-8")
     request = urllib.request.Request(
         API_URL,
@@ -34,6 +35,7 @@ def _is_success_code(code) -> bool:
 
 
 def parse_events(response: dict) -> list[dict]:
+    """Извлекает список мероприятий из ответа API."""
     if not _is_success_code(response.get("code")):
         message = response.get("message") or response.get("description") or "неизвестная ошибка"
         raise ValueError(f"API вернул ошибку: {message}")
