@@ -1,4 +1,4 @@
-from __future__ import annotations
+# Рекомендации мероприятий через GigaChat
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole
 
@@ -10,62 +10,38 @@ from config import (
     GIGACHAT_SCOPE,
     GIGACHAT_VERIFY_SSL_CERTS,
 )
-from database import fetch_events_catalog, format_events_catalog, init_db
+from database import catalog_text, init_db, load_catalog
 
-SYSTEM_PROMPT = """Ты помощник по афише федеральной территории «Сириус».
-
-Правила:
-- Рекомендуй ТОЛЬКО мероприятия из переданного списка.
-- В каждой рекомендации укажи id, дату, время и название.
-- Кратко объясни, почему мероприятие подходит запросу.
-- Если подходящих нет — так и скажи, предложи уточнить запрос.
-- Не выдумывай мероприятия и не меняй даты/время из списка.
-- Отвечай по-русски, до 5 пунктов."""
+SYSTEM_PROMPT = (
+    "Ты помощник по афише «Сириус». Рекомендуй только события из списка. "
+    "Указывай id, дату, время, название. До 5 пунктов. Не выдумывай события."
+)
 
 
-def _create_client() -> GigaChat:
-    if not GIGACHAT_CREDENTIALS:
-        raise RuntimeError(
-            "Не задан GIGACHAT_CREDENTIALS. Скопируйте .env.example в .env "
-            "и вставьте ключ из https://developers.sber.ru/studio/"
-        )
-
-    kwargs: dict = {
-        "credentials": GIGACHAT_CREDENTIALS,
-        "scope": GIGACHAT_SCOPE,
-        "model": GIGACHAT_MODEL,
-        "verify_ssl_certs": GIGACHAT_VERIFY_SSL_CERTS,
-    }
-    if GIGACHAT_CA_BUNDLE_FILE:
-        kwargs["ca_bundle_file"] = GIGACHAT_CA_BUNDLE_FILE
-
-    return GigaChat(**kwargs)
-
-
-def recommend_events(user_query: str, db_path: str = DB_PATH) -> str:
+def recommend_events(query: str, db_path: str = DB_PATH) -> str:
     conn = init_db(db_path)
-    rows = fetch_events_catalog(conn)
+    rows = load_catalog(conn)
     conn.close()
 
     if not rows:
-        raise RuntimeError(
-            "База пустая. Сначала загрузите афишу: python main.py --once"
-        )
+        raise RuntimeError("База пуста. Запустите: python main.py --once")
+    if not GIGACHAT_CREDENTIALS:
+        raise RuntimeError("Задайте GIGACHAT_CREDENTIALS в .env")
 
-    catalog = format_events_catalog(rows)
-    user_message = (
-        f"Список мероприятий ({len(rows)} шт.):\n{catalog}\n\n"
-        f"Запрос пользователя: {user_query}"
+    text = f"Список ({len(rows)}):\n{catalog_text(rows)}\n\nЗапрос: {query}"
+    chat = Chat(messages=[
+        Messages(role=MessagesRole.SYSTEM, content=SYSTEM_PROMPT),
+        Messages(role=MessagesRole.USER, content=text),
+    ])
+
+    opts = dict(
+        credentials=GIGACHAT_CREDENTIALS,
+        scope=GIGACHAT_SCOPE,
+        model=GIGACHAT_MODEL,
+        verify_ssl_certs=GIGACHAT_VERIFY_SSL_CERTS,
     )
+    if GIGACHAT_CA_BUNDLE_FILE:
+        opts["ca_bundle_file"] = GIGACHAT_CA_BUNDLE_FILE
 
-    chat = Chat(
-        messages=[
-            Messages(role=MessagesRole.SYSTEM, content=SYSTEM_PROMPT),
-            Messages(role=MessagesRole.USER, content=user_message),
-        ]
-    )
-
-    with _create_client() as client:
-        response = client.chat(chat)
-
-    return response.choices[0].message.content
+    with GigaChat(**opts) as client:
+        return client.chat(chat).choices[0].message.content

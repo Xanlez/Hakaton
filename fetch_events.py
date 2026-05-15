@@ -1,3 +1,4 @@
+# Загрузка афиши с API Sirius
 import json
 import urllib.error
 import urllib.request
@@ -6,46 +7,36 @@ from config import API_URL
 
 
 def fetch_event_list(body: dict | None = None, timeout: int = 30) -> dict:
-    """POST /api/afisha/event/list и возврат распарсенного JSON."""
     payload = json.dumps(body or {}).encode("utf-8")
-    request = urllib.request.Request(
+    req = urllib.request.Request(
         API_URL,
         data=payload,
         method="POST",
         headers={"Content-Type": "application/json", "Accept": "application/json"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+        raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')}") from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Ошибка сети: {exc.reason}") from exc
-
-
-def _is_success_code(code) -> bool:
-    if code is None:
-        return True
-    if isinstance(code, int):
-        return 0 <= code < 400
-    if isinstance(code, str):
-        return code.isdigit() and int(code) < 400 or code.upper() in ("OK", "SUCCESS")
-    return False
+        raise RuntimeError(f"Сеть: {exc.reason}") from exc
 
 
 def parse_events(response: dict) -> list[dict]:
-    """Извлекает список мероприятий из ответа API."""
-    if not _is_success_code(response.get("code")):
-        message = response.get("message") or response.get("description") or "неизвестная ошибка"
-        raise ValueError(f"API вернул ошибку: {message}")
+    code = response.get("code")
+    if code is not None:
+        ok = (isinstance(code, int) and code < 400) or (
+            isinstance(code, str) and (code.isdigit() and int(code) < 400 or code.upper() in ("OK", "SUCCESS"))
+        )
+        if not ok:
+            msg = response.get("message") or response.get("description") or "ошибка API"
+            raise ValueError(msg)
 
     payload = response.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("В ответе нет поля payload")
-
+        raise ValueError("нет payload")
     events = payload.get("events")
     if not isinstance(events, list):
-        raise ValueError("В payload нет списка events")
-
+        raise ValueError("нет events")
     return events
