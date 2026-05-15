@@ -36,6 +36,13 @@ except ImportError:
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-30!__%on3fzapsk=t0ntkfj)%pmo@)_-corg9=9b@y$@=_ohea'
 
+# Регистрация по ссылке: отдельный «перец» для HMAC токена (опционально; иначе используется SECRET_KEY).
+REGISTRATION_TOKEN_PEPPER = os.environ.get("REGISTRATION_TOKEN_PEPPER", "").strip() or None
+# Ключ Fernet для pending password (значение от Fernet.generate_key()); иначе ключ выводится из SECRET_KEY.
+REGISTRATION_PENDING_PASSWORD_FERNET_KEY = os.environ.get(
+    "REGISTRATION_PENDING_PASSWORD_FERNET_KEY", ""
+).strip() or None
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -43,6 +50,8 @@ ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 
 
 # Application definition
+
+AUTH_USER_MODEL = 'assistant.User'
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -138,7 +147,7 @@ LOGOUT_REDIRECT_URL = "/"
 # Почта: DJANGO_EMAIL_* или те же имена, что в fbe-cloud (SMTP_HOST, SMTP_USER, …)
 _smtp_host = (os.environ.get("DJANGO_EMAIL_HOST") or os.environ.get("SMTP_HOST", "")).strip()
 _smtp_user = (os.environ.get("DJANGO_EMAIL_HOST_USER") or os.environ.get("SMTP_USER", "")).strip()
-_smtp_password = os.environ.get("DJANGO_EMAIL_HOST_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")
+_smtp_password = (os.environ.get("DJANGO_EMAIL_HOST_PASSWORD") or os.environ.get("SMTP_PASSWORD", "")).strip()
 _smtp_port_raw = os.environ.get("DJANGO_EMAIL_PORT") or os.environ.get("SMTP_PORT", "587")
 _smtp_from = (
     os.environ.get("DJANGO_DEFAULT_FROM_EMAIL")
@@ -153,6 +162,7 @@ EMAIL_HOST_USER = _smtp_user
 EMAIL_HOST_PASSWORD = _smtp_password
 EMAIL_USE_TLS = os.environ.get("DJANGO_EMAIL_USE_TLS", "true").lower() in ("1", "true", "yes")
 EMAIL_USE_SSL = os.environ.get("DJANGO_EMAIL_USE_SSL", "").lower() in ("1", "true", "yes")
+EMAIL_TIMEOUT = int(os.environ.get("DJANGO_EMAIL_TIMEOUT", "30"))
 
 if EMAIL_HOST and EMAIL_HOST_USER:
     EMAIL_BACKEND = os.environ.get(

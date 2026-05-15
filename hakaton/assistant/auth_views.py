@@ -1,23 +1,35 @@
 import logging
+from datetime import timedelta
 
+from django.conf import settings
 from django.contrib import messages
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.views import LoginView as DjangoLoginView
 from django.contrib.auth.views import LogoutView as DjangoLogoutView
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
-from django.utils.encoding import force_str
-from django.utils.http import urlsafe_base64_decode
+from django.utils import timezone as dj_tz
 from django.views.generic import TemplateView
 from django.views.generic.edit import FormView
 
 from assistant.chat_storage import merge_guest_session_into_user
-from assistant.email_activation import check_activation_token, send_activation_email
+from assistant.email_activation import send_pending_registration_email
+from assistant.registration_tokens import (
+    decrypt_pending_password_hash,
+    encrypt_pending_password_hash,
+    new_registration_token_pair,
+    registration_token_digest,
+)
 from assistant.forms import AuthLoginForm, RegisterForm
+from assistant.models import PendingRegistration
 
 logger = logging.getLogger(__name__)
+
+PENDING_LINK_MAX_AGE = timedelta(hours=72)
 
 
 class AuthLoginView(DjangoLoginView):
@@ -45,23 +57,42 @@ class AuthRegisterView(FormView):
         return ctx
 
     def form_valid(self, form):
-        user = form.save(commit=False)
-        user.is_active = False
-        user.save()
-        merge_guest_session_into_user(self.request, user)
+        username = form.cleaned_data["username"]
+        email = (form.cleaned_data["email"] or "").strip().lower()
+        raw_password = form.cleaned_data["password1"]
+
+        PendingRegistration.objects.filter(email__iexact=email).delete()
+
+        plain_token, token_digest = new_registration_token_pair()
+        pending = PendingRegistration.objects.create(
+            username=username,
+            email=email,
+            password_hash=encrypt_pending_password_hash(make_password(raw_password)),
+            token_digest=token_digest,
+        )
 
         try:
-            send_activation_email(self.request, user)
+            send_pending_registration_email(
+                self.request,
+                username=pending.username,
+                email=pending.email,
+                token=plain_token,
+            )
             messages.success(
                 self.request,
-                "На указанную почту отправлено письмо со ссылкой для подтверждения.",
+                "На почту отправлена ссылка. Аккаунт появится только после перехода по ней.",
             )
-        except Exception:
-            logger.exception("send_activation_email failed for %s", user.pk)
-            messages.warning(
+        except Exception as exc:
+            logger.exception("send_pending_registration_email failed for pending %s", pending.pk)
+            pending.delete()
+            hint = (
+                "Настройте отправку в файле .env (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM) "
+                "или переменные DJANGO_EMAIL_*."
+            )
+            tail = f" Техническая причина ({type(exc).__name__}): {exc}" if settings.DEBUG else ""
+            messages.error(
                 self.request,
-                "Аккаунт создан, но письмо не отправилось. Настройте SMTP (переменные DJANGO_EMAIL_*) "
-                "или обратитесь к администратору.",
+                "Письмо не отправилось — запись о регистрации не сохранена. " + hint + tail,
             )
 
         return redirect("assistant:register_done")
@@ -76,15 +107,11 @@ class AuthRegisterDoneView(TemplateView):
         return ctx
 
 
-def activate_account(request: HttpRequest, uidb64: str, token: str) -> HttpResponse:
-    User = get_user_model()
-    try:
-        uid = force_str(urlsafe_base64_decode(uidb64))
-        user = User.objects.get(pk=int(uid))
-    except (ValueError, TypeError, OverflowError, User.DoesNotExist):
-        user = None
+def confirm_registration(request: HttpRequest, token: str) -> HttpResponse:
+    digest = registration_token_digest((token or "").strip())
+    pending = PendingRegistration.objects.filter(token_digest=digest).first()
 
-    if user is None:
+    if pending is None:
         return render(
             request,
             "assistant/auth_activation_invalid.html",
@@ -92,25 +119,40 @@ def activate_account(request: HttpRequest, uidb64: str, token: str) -> HttpRespo
             status=400,
         )
 
-    if user.is_active:
-        messages.info(request, "Этот аккаунт уже подтверждён — можно войти.")
-        return redirect("assistant:login")
-
-    if check_activation_token(user, token):
-        user.is_active = True
-        user.save(update_fields=["is_active"])
-        messages.success(
+    now = dj_tz.now()
+    if pending.created_at + PENDING_LINK_MAX_AGE < now:
+        pending.delete()
+        messages.error(
             request,
-            "Почта подтверждена. Теперь войдите с именем пользователя и паролем.",
+            "Ссылка устарела. Зарегистрируйтесь снова — новое письмо придёт на почту.",
         )
+        return redirect("assistant:register")
+
+    User = get_user_model()
+    if User.objects.filter(email__iexact=pending.email).exists():
+        pending.delete()
+        messages.info(request, "Аккаунт с этой почтой уже есть — войдите.")
         return redirect("assistant:login")
 
-    return render(
-        request,
-        "assistant/auth_activation_invalid.html",
-        {"nav_section": "login"},
-        status=400,
-    )
+    try:
+        with transaction.atomic():
+            user = User(
+                username=pending.username,
+                email=pending.email,
+                is_active=True,
+            )
+            user.password = decrypt_pending_password_hash(pending.password_hash)
+            user.save()
+            pending.delete()
+    except IntegrityError:
+        pending.delete()
+        messages.error(request, "Не удалось создать аккаунт (конфликт данных). Попробуйте снова.")
+        return redirect("assistant:register")
+
+    merge_guest_session_into_user(request, user)
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    messages.success(request, "Регистрация подтверждена — вы вошли в аккаунт.")
+    return redirect("assistant:cabinet")
 
 
 class CabinetView(LoginRequiredMixin, TemplateView):

@@ -15,7 +15,7 @@
         <form method="post" class="auth-form" action="">
             {% csrf_token %}
             <div class="auth-field">
-                <label class="auth-label text-additional" for="id_username">Имя пользователя</label>
+                <label class="auth-label text-additional" for="id_username">Имя или никнейм</label>
                 {{ form.username.errors }}
                 {{ form.username }}
             </div>

@@ -8,8 +8,9 @@
     <div class="auth-card bg-surface">
         <h1 class="auth-heading text-secondary">Проверьте почту</h1>
         <p class="auth-foot text-secondary" style="margin-top: 0;">
-            Если письмо с подтверждением ушло без ошибок, откройте ссылку в нём — после этого можно
-            <a href="{% url 'assistant:login' %}" class="text-primary">войти в аккаунт</a>.
+            До перехода по ссылке из письма аккаунт не создаётся. После подтверждения вы автоматически войдёте в систему;
+            при необходимости позже можно
+            <a href="{% url 'assistant:login' %}" class="text-primary">войти вручную</a>.
         </p>
         <p class="auth-foot text-additional">
             Нет письма через пару минут? Загляните в спам или уточните настройки SMTP у администратора сайта (в режиме разработки письма часто только в консоли сервера).

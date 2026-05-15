@@ -9,8 +9,8 @@
     <div class="cabinet-card bg-surface">
         <h1 class="cabinet-heading text-secondary">Личный кабинет</h1>
         <p class="cabinet-line text-secondary">
-            <strong>Вход:</strong> {{ user.username }}
-            {% if user.email %} · {{ user.email }}{% endif %}
+            <strong>Почта:</strong> {{ user.email }}
+            {% if user.username %} · <strong>Имя:</strong> {{ user.username }}{% endif %}
         </p>
         <p class="cabinet-line text-additional">
             Сохранённых чатов: <strong class="text-secondary">{{ saved_thread_count }}</strong>.
