@@ -1,0 +1,9 @@
+*.db
+.env
+api_sample.json
+_docx_extract.txt
+__pycache__/
+.idea/
+*.pyc
+.venv/
+venv/
