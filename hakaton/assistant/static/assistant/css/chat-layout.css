@@ -553,6 +553,12 @@ html.page-chat.v-theme--light .app-main {
     box-sizing: border-box;
 }
 
+.chat-composer__msg-form {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+}
+
 .chat-composer__field {
     flex: 1;
     min-width: 0;
@@ -667,27 +673,6 @@ html.page-chat.v-theme--light .app-main {
     flex-shrink: 0;
 }
 
-.app-nav__logout-form {
-    margin: 0;
-    display: inline-flex;
-    align-items: center;
-}
-
-.app-nav__logout {
-    cursor: pointer;
-    border: none;
-    background: transparent;
-    padding: 8px 16px;
-    border-radius: 8px;
-    font: inherit;
-    font-size: 0.9375rem;
-    font-weight: 500;
-}
-
-.app-nav__logout:hover:not(:disabled) {
-    background: rgba(var(--v-theme-primary), 0.06);
-}
-
 .app-nav__link {
     text-decoration: none;
     color: inherit;
@@ -759,6 +744,122 @@ html.page-chat.v-theme--light .app-main {
     max-width: 420px;
     margin-left: auto;
     margin-right: auto;
+}
+
+.afisha-empty--soft {
+    border-style: solid;
+    background: rgba(var(--v-theme-secondary), 0.04);
+}
+
+.afisha-toolbar-wrap {
+    margin-bottom: 20px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+}
+
+.afisha-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+}
+
+.afisha-toolbar__label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    flex: 0 0 auto;
+}
+
+.afisha-toolbar__input {
+    flex: 1 1 220px;
+    min-width: 0;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+    background: rgb(var(--v-theme-background));
+    color: rgb(var(--v-theme-on-background));
+    font: inherit;
+    font-size: 0.9375rem;
+    box-sizing: border-box;
+}
+
+.afisha-toolbar__input:focus {
+    outline: none;
+    border-color: rgba(var(--v-theme-primary), 0.55);
+    box-shadow: 0 0 0 2px rgba(var(--v-theme-primary), 0.15);
+}
+
+.afisha-toolbar__submit {
+    flex: 0 0 auto;
+    padding: 10px 18px;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: filter 0.15s;
+}
+
+.afisha-toolbar__submit:hover {
+    filter: brightness(1.06);
+}
+
+.afisha-toolbar__reset {
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.afisha-summary {
+    margin: 0 0 14px;
+    font-size: 0.8125rem;
+}
+
+.afisha-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 28px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+}
+
+.afisha-pagination__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 100px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-decoration: none;
+    background: rgb(var(--v-theme-primary));
+    color: rgb(var(--v-theme-on-primary));
+    border: none;
+    box-sizing: border-box;
+    transition: filter 0.15s;
+}
+
+.afisha-pagination__btn:hover:not(.afisha-pagination__btn--muted) {
+    filter: brightness(1.06);
+}
+
+.afisha-pagination__btn--muted {
+    background: rgba(var(--v-theme-grey), 0.25);
+    color: rgb(var(--v-theme-on-background));
+    opacity: 0.45;
+    cursor: default;
+    pointer-events: none;
+}
+
+.afisha-pagination__status {
+    font-size: 0.8125rem;
+    font-weight: 500;
 }
 
 .events-grid {
@@ -1132,6 +1233,110 @@ html.page-chat.v-theme--light .app-main {
     line-height: 1.5;
 }
 
+.cabinet-tokens {
+    margin-top: 6px;
+    margin-bottom: 4px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+}
+
+.cabinet-plan {
+    margin-top: 6px;
+    margin-bottom: 16px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+}
+
+.cabinet-plan-form {
+    margin: 12px 0 10px;
+}
+
+.cabinet-plan-fieldset {
+    border: none;
+    margin: 0 0 12px;
+    padding: 0;
+}
+
+.cabinet-plan-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin: 0 0 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+.cabinet-plan-row input {
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.cabinet-plan-submit {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s;
+}
+
+.cabinet-plan-submit:hover {
+    filter: brightness(1.05);
+}
+
+.cabinet-tokens__title {
+    margin: 0 0 8px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+}
+
+.cabinet-api-balance-wrap {
+    overflow-x: auto;
+    margin-top: 4px;
+}
+
+.cabinet-api-balance {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.cabinet-api-balance th,
+.cabinet-api-balance td {
+    padding: 8px 10px;
+    border-bottom: 1px solid rgb(var(--v-theme-border-color));
+    text-align: left;
+    vertical-align: top;
+}
+
+.cabinet-api-balance th {
+    font-weight: 600;
+    font-size: 0.8125rem;
+}
+
+.cabinet-api-balance__col-num {
+    width: 7rem;
+}
+
+.cabinet-api-balance__num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.cabinet-api-balance tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.cabinet-tokens__text code {
+    font-size: 0.8125em;
+}
+
 .cabinet-actions {
     display: flex;
     flex-wrap: wrap;
@@ -1323,7 +1528,106 @@ html.page-chat.v-theme--light .app-main {
         width: 100%;
     }
 
+    .chat-local-giga {
+        width: 100%;
+    }
+
+    .chat-local-giga__select {
+        max-width: none;
+    }
+
     .chat-msg {
         max-width: 95%;
     }
+}
+
+/* --- Модель GigaChat между полем ввода и кнопкой (локальный доступ) --- */
+.chat-local-giga {
+    flex-shrink: 0;
+}
+
+.chat-local-giga__form {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chat-local-giga__label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.15;
+    text-align: center;
+}
+
+.chat-local-giga__wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: 44px;
+    border-radius: 10px;
+    border: 1px solid rgb(var(--v-theme-border-color));
+    box-shadow: 0 1px 0 rgba(var(--v-theme-primary), 0.06);
+}
+
+.chat-local-giga__wrap::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid rgba(var(--v-theme-secondary-darken-1), 0.5);
+}
+
+.chat-local-giga__select {
+    display: block;
+    flex: 1;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 9.75rem;
+    max-width: 13rem;
+    margin: 0;
+    padding: 0 34px 0 12px;
+    font-family: Rubik, system-ui, -apple-system, sans-serif;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.25;
+    border: none;
+    border-radius: 9px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+.chat-local-giga__select::-ms-expand {
+    display: none;
+}
+
+.chat-local-giga__select:hover {
+    background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.chat-local-giga__select:focus-visible {
+    outline: 2px solid rgb(var(--v-theme-primary));
+    outline-offset: 2px;
+}
+
+.cabinet-gc-balance-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+}
+
+.cabinet-gc-balance-row {
+    padding: 4px 0;
+    font-size: 0.875rem;
+    line-height: 1.4;
 }

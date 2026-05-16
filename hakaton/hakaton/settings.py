@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -43,10 +44,34 @@ REGISTRATION_PENDING_PASSWORD_FERNET_KEY = os.environ.get(
     "REGISTRATION_PENDING_PASSWORD_FERNET_KEY", ""
 ).strip() or None
 
+# Три тарифные линии модели в ЛК; scope всегда из config.py / .env.
+GIGACHAT_PLAN_DEFAULT_SLUG = (os.environ.get("GIGACHAT_PLAN_DEFAULT_SLUG") or "gigachat").strip()
+GIGACHAT_PLAN_OPTIONS = (
+    {"slug": "gigachat", "label": "GigaChat", "scope": "", "model": "GigaChat"},
+    {"slug": "gigachat-pro", "label": "GigaChat-Pro", "scope": "", "model": "GigaChat-Pro"},
+    {"slug": "gigachat-max", "label": "GigaChat-Max", "scope": "", "model": "GigaChat-Max"},
+)
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
+ALLOWED_HOSTS = ['*']
+
+# Запросы с loopback (127.0.0.1 / ::1): GigaChat с общим промптом («как нейросеть») и более длинный чат.
+# Отключение: ASSISTANT_LOCAL_LL_SIMPLE=0 или ASSISTANT_LOCAL_RELAX_CHAT_LIMITS=0 в .env
+ASSISTANT_LOCAL_LL_SIMPLE = os.environ.get("ASSISTANT_LOCAL_LL_SIMPLE", "true").lower() in ("1", "true", "yes")
+ASSISTANT_LOCAL_LL_SIMPLE_REQUIRE_DEBUG = (
+    os.environ.get("ASSISTANT_LOCAL_LL_REQUIRE_DEBUG", "").lower() in ("1", "true", "yes")
+)
+ASSISTANT_LOCAL_RELAX_CHAT_LIMITS = (
+    os.environ.get("ASSISTANT_LOCAL_RELAX_CHAT_LIMITS", "true").lower() in ("1", "true", "yes")
+)
+CHAT_LOCAL_MESSAGES_PER_THREAD_MAX = int(os.environ.get("CHAT_LOCAL_MESSAGES_PER_THREAD_MAX", "240"))
+CHAT_LOCAL_THREADS_MAX = int(os.environ.get("CHAT_LOCAL_THREADS_MAX", "60"))
+# Выбор модели в чате (между полем и «Отправить») только при локальном (loopback) доступе (ASSISTANT_LOCAL_GIGACHAT_BANNER=0 — скрыть)
+ASSISTANT_LOCAL_GIGACHAT_BANNER = (
+    os.environ.get("ASSISTANT_LOCAL_GIGACHAT_BANNER", "true").lower() in ("1", "true", "yes")
+)
 
 
 # Application definition
@@ -69,6 +94,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'assistant.logging_user.AttachUserLoggingContextMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -85,6 +111,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'assistant.context_processors.local_gigachat_banner',
             ],
         },
     },
@@ -179,3 +206,55 @@ else:
         os.environ.get("DJANGO_DEFAULT_FROM_EMAIL")
         or _smtp_from
     )
+
+_django_log_level_name = (
+    os.environ.get("DJANGO_LOG_LEVEL") or os.environ.get("LOG_LEVEL") or "INFO"
+).upper()
+DJANGO_ROOT_LOG_LEVEL = getattr(logging, _django_log_level_name, logging.INFO)
+
+_raw_log_file = os.environ.get("DJANGO_LOG_FILE", "").strip()
+DJANGO_LOG_PATH = Path(_raw_log_file) if _raw_log_file else (BASE_DIR / "logs" / "django.log")
+if not DJANGO_LOG_PATH.is_absolute():
+    DJANGO_LOG_PATH = BASE_DIR / DJANGO_LOG_PATH
+DJANGO_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+DJANGO_LOG_MAX_BYTES = int(os.environ.get("DJANGO_LOG_MAX_BYTES", str(5 * 1024 * 1024)))
+DJANGO_LOG_BACKUP_COUNT = int(os.environ.get("DJANGO_LOG_BACKUP_COUNT", "5"))
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "user_context": {
+            "()": "assistant.logging_user.UserLoggingFilter",
+        },
+    },
+    "formatters": {
+        "with_user": {
+            "format": (
+                "{levelname} {asctime} | {user_repr} | {name} | {message}"
+            ),
+            "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "filters": ["user_context"],
+            "formatter": "with_user",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": str(DJANGO_LOG_PATH),
+            "maxBytes": DJANGO_LOG_MAX_BYTES,
+            "backupCount": DJANGO_LOG_BACKUP_COUNT,
+            "encoding": "utf-8",
+            "filters": ["user_context"],
+            "formatter": "with_user",
+        },
+    },
+    "root": {
+        "handlers": ["console", "file"],
+        "level": DJANGO_ROOT_LOG_LEVEL,
+    },
+}

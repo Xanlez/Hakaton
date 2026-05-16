@@ -15,53 +15,108 @@
         <div class="afisha-empty bg-surface">
             <p class="text-secondary">Не удалось подготовить афишу: {{ afisha_error }}</p>
         </div>
-    {% elif not events %}
-        <div class="afisha-empty bg-surface">
-            <p class="text-secondary">Пока нет событий в базе. Заполните её командой синхронизации из корня проекта.</p>
-            <p class="text-additional"><code>python main.py --once</code></p>
-        </div>
     {% else %}
-        <div class="events-grid">
-            {% for ev in events %}
-                <article class="event-card bg-surface">
-                    {% if ev.image_url %}
-                        <div class="event-card__media">
-                            <img src="{{ ev.image_url }}" alt="" loading="lazy" decoding="async">
-                        </div>
-                    {% else %}
-                        <div class="event-card__media" aria-hidden="true"></div>
-                    {% endif %}
-                    <div class="event-card__body">
-                        {% if ev.afisha_type_name %}
-                            <span class="event-card__meta">{{ ev.afisha_type_name }}</span>
-                        {% endif %}
-                        <h2 class="event-card__title">{{ ev.event_name }}</h2>
-                        <div class="event-card__when">
-                            {{ ev.event_start_date }}
-                            {% if ev.time_slot and ev.time_slot != "all-day" %}
-                                · {{ ev.time_slot }}
-                            {% elif ev.time_slot == "all-day" %}
-                                · весь день
-                            {% endif %}
-                        </div>
-                        {% if ev.event_place %}
-                            <div class="event-card__place">{{ ev.event_place }}</div>
-                        {% endif %}
-                        {% if ev.event_description_preview %}
-                            <p class="event-card__desc text-additional">{{ ev.event_description_preview }}</p>
-                        {% endif %}
-                        <div class="event-card__footer event-card__footer--split">
-                            <a href="{% url 'assistant:chat' %}?event={{ ev.event_id }}" class="event-card__more bg-primary">
-                                Подробнее в чате
-                            </a>
-                            <a href="{% url 'assistant:event_detail' ev.event_id %}" class="event-card__secondary">
-                                Карточка
-                            </a>
-                        </div>
-                    </div>
-                </article>
-            {% endfor %}
+        <div class="afisha-toolbar-wrap bg-surface">
+            <form class="afisha-toolbar" method="get" action="{% url 'assistant:afisha' %}" role="search" aria-label="Поиск по афише">
+                <label class="afisha-toolbar__label text-secondary-darken-1" for="afisha-q">Поиск</label>
+                <input
+                    class="afisha-toolbar__input"
+                    type="search"
+                    id="afisha-q"
+                    name="q"
+                    value="{{ search_query }}"
+                    placeholder="Название, место, тип, описание..."
+                    maxlength="500"
+                    autocomplete="off"
+                >
+                <button type="submit" class="afisha-toolbar__submit bg-primary-darken-1 on-primary-darken-1">Найти</button>
+                {% if search_query %}
+                    <a class="afisha-toolbar__reset text-secondary-darken-1" href="{% url 'assistant:afisha' %}">Сбросить</a>
+                {% endif %}
+            </form>
         </div>
+
+        {% if not events_db_nonempty %}
+            <div class="afisha-empty bg-surface">
+                <p class="text-secondary">Пока нет событий в базе. Заполните её командой синхронизации из корня проекта.</p>
+                <p class="text-additional"><code>python main.py --once</code></p>
+            </div>
+        {% elif not events %}
+            <div class="afisha-empty afisha-empty--soft bg-surface">
+                <p class="text-secondary">По запросу «<strong>{{ search_query }}</strong>» ничего не найдено. Попробуйте другие слова или посмотрите <a href="{% url 'assistant:afisha' %}">всю афишу</a>.</p>
+            </div>
+        {% else %}
+            {% if page_obj.paginator.num_pages > 1 or search_query %}
+                <p class="afisha-summary text-additional">
+                    {% if search_query %}Найдено {{ page_obj.paginator.count }}. {% endif %}
+                    {% if page_obj.paginator.num_pages > 1 %}
+                        Показано {{ page_obj.start_index }}–{{ page_obj.end_index }} из {{ page_obj.paginator.count }}.
+                    {% endif %}
+                </p>
+            {% endif %}
+
+            <div class="events-grid">
+                {% for ev in events %}
+                    <article class="event-card bg-surface">
+                        {% if ev.image_url %}
+                            <div class="event-card__media">
+                                <img src="{{ ev.image_url }}" alt="" loading="lazy" decoding="async">
+                            </div>
+                        {% else %}
+                            <div class="event-card__media" aria-hidden="true"></div>
+                        {% endif %}
+                        <div class="event-card__body">
+                            {% if ev.afisha_type_name %}
+                                <span class="event-card__meta">{{ ev.afisha_type_name }}</span>
+                            {% endif %}
+                            <h2 class="event-card__title">{{ ev.event_name }}</h2>
+                            <div class="event-card__when">
+                                {{ ev.event_start_date }}
+                                {% if ev.time_slot and ev.time_slot != "all-day" %}
+                                    · {{ ev.time_slot }}
+                                {% elif ev.time_slot == "all-day" %}
+                                    · весь день
+                                {% endif %}
+                            </div>
+                            {% if ev.event_place %}
+                                <div class="event-card__place">{{ ev.event_place }}</div>
+                            {% endif %}
+                            {% if ev.event_description_preview %}
+                                <p class="event-card__desc text-additional">{{ ev.event_description_preview }}</p>
+                            {% endif %}
+                            <div class="event-card__footer event-card__footer--split">
+                                <a href="{% url 'assistant:chat' %}?event={{ ev.event_id }}" class="event-card__more bg-primary">
+                                    Подробнее в чате
+                                </a>
+                                <a href="{% url 'assistant:event_detail' ev.event_id %}" class="event-card__secondary">
+                                    Карточка
+                                </a>
+                            </div>
+                        </div>
+                    </article>
+                {% endfor %}
+            </div>
+
+            {% if page_obj.has_other_pages %}
+                <nav class="afisha-pagination bg-surface" aria-label="Страницы афиши">
+                    {% if page_obj.has_previous %}
+                        <a class="afisha-pagination__btn" href="?{% if search_query %}q={{ search_query|urlencode }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">Назад</a>
+                    {% else %}
+                        <span class="afisha-pagination__btn afisha-pagination__btn--muted" aria-hidden="true">Назад</span>
+                    {% endif %}
+
+                    <span class="afisha-pagination__status text-secondary-darken-1">
+                        Стр. {{ page_obj.number }} / {{ page_obj.paginator.num_pages }}
+                    </span>
+
+                    {% if page_obj.has_next %}
+                        <a class="afisha-pagination__btn" href="?{% if search_query %}q={{ search_query|urlencode }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Далее</a>
+                    {% else %}
+                        <span class="afisha-pagination__btn afisha-pagination__btn--muted" aria-hidden="true">Далее</span>
+                    {% endif %}
+                </nav>
+            {% endif %}
+        {% endif %}
     {% endif %}
 </div>
 {% endblock %}

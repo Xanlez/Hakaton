@@ -42,10 +42,6 @@
                         <a href="{% url 'assistant:cabinet' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'cabinet' %} app-nav__item--active{% endif %}" title="Личный кабинет" aria-label="Личный кабинет">
                             ЛК
                         </a>
-                        <form method="post" action="{% url 'assistant:logout' %}" class="app-nav__logout-form">
-                            {% csrf_token %}
-                            <button type="submit" class="app-nav__item app-nav__link app-nav__logout text-secondary-darken-1">Выйти</button>
-                        </form>
                         {% else %}
                         <a href="{% url 'assistant:cabinet' %}" class="app-nav__item app-nav__link text-secondary-darken-1{% if section == 'cabinet' or section == 'login' or section == 'register' %} app-nav__item--active{% endif %}" title="Вход и регистрация — личный кабинет" aria-label="Личный кабинет">
                             ЛК

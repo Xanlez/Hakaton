@@ -16,6 +16,40 @@
             Сохранённых чатов: <strong class="text-secondary">{{ saved_thread_count }}</strong>.
             Открыть и продолжить переписки можно во вкладке «Чат» — история загружается с сервера.
         </p>
+        <section class="cabinet-plan bg-background" aria-labelledby="cabinet-plan-h">
+            <h2 id="cabinet-plan-h" class="cabinet-tokens__title text-secondary-darken-1">Модель GigaChat и остаток</h2>
+            {% if show_local_gigachat_banner %}
+                <p class="cabinet-line cabinet-tokens__text text-additional">
+                    При <strong>локальном доступе</strong> модель задаётся <strong>в чате</strong>: выпадающий список между полем сообщения и кнопкой «Отправить».
+                    Сейчас: <strong>scope</strong> <code>{{ gigachat_effective_scope }}</code>,
+                    <strong>model</strong> <code>{{ gigachat_effective_model }}</code>.
+                </p>
+            {% else %}
+                <p class="cabinet-line cabinet-tokens__text text-additional">
+                    При доступе из сети для всех используется <strong>одна</strong> связка из
+                    <code>.env</code> / <code>config.py</code>: <strong>scope</strong>
+                    <code>{{ gigachat_effective_scope }}</code>, <strong>model</strong>
+                    <code>{{ gigachat_effective_model }}</code>. Режимы Pro / Max здесь не активируются.
+                </p>
+            {% endif %}
+            {% if gigachat_plan_options %}
+                <ul class="cabinet-gc-balance-list text-secondary">
+                    {% for p in gigachat_plan_options %}
+                        <li class="cabinet-gc-balance-row">
+                            <strong>{{ p.label }}</strong>
+                            {% if p.balance_remain is not None %}
+                                <span class="text-additional cabinet-gc-balance-row__v">
+                                    · остаток: {{ p.balance_remain|floatformat:0 }}</span>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+            {% if gigachat_balance_error %}
+                <p class="cabinet-line text-additional" role="status">{{ gigachat_balance_error }}</p>
+            {% endif %}
+        </section>
+
         <nav class="cabinet-actions" aria-label="Действия">
             <a href="{% url 'assistant:chat' %}" class="cabinet-btn cabinet-btn--primary bg-primary">
                 Открыть чаты

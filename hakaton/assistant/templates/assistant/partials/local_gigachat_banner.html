@@ -1,0 +1,21 @@
+<div class="chat-local-giga">
+    <form method="post" action="{{ local_gigachat_plan_url }}" class="chat-local-giga__form">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <div class="chat-local-giga__wrap bg-surface">
+            <select
+                id="chat-local-giga-plan"
+                name="plan_slug"
+                class="chat-local-giga__select text-secondary-darken-1"
+                autocomplete="off"
+                onchange="this.form.submit()"
+                title="Модель GigaChat при локальном доступе (loopback)"
+            >
+                {% for o in local_gigachat_banner_options %}
+                    <option value="{{ o.slug }}" {% if local_gigachat_banner_slug == o.slug %}selected{% endif %}>{{ o.label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <label class="chat-local-giga__label text-additional" for="chat-local-giga-plan">Локальный доступ</label>
+    </form>
+</div>

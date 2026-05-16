@@ -79,10 +79,11 @@ def _migrate_legacy_session_if_needed(request) -> None:
     _save_session_state(request, state)
 
 
-def trim_thread_list(state: dict) -> None:
+def trim_thread_list(state: dict, *, threads_max: int | None = None) -> None:
     order = state["order"]
     threads = state["threads"]
-    while len(order) > CHAT_THREADS_MAX:
+    cap = CHAT_THREADS_MAX if threads_max is None else threads_max
+    while len(order) > cap:
         old = order.pop()
         threads.pop(old, None)
     if state["active_id"] not in threads:
@@ -93,10 +94,17 @@ def trim_thread_list(state: dict) -> None:
 
 
 @transaction.atomic
-def sync_state_to_database(user, state: dict) -> None:
+def sync_state_to_database(
+    user,
+    state: dict,
+    *,
+    messages_per_thread_max: int | None = None,
+    threads_max: int | None = None,
+) -> None:
     """Полная синхронизация dict-состояния в БД для пользователя."""
+    msgs_cap = CHAT_MESSAGES_PER_THREAD_MAX if messages_per_thread_max is None else messages_per_thread_max
     state = normalize_state({**state, "threads": {**state.get("threads", {})}})
-    trim_thread_list(state)
+    trim_thread_list(state, threads_max=threads_max)
     thread_ids = list(state["threads"].keys())
     ChatThread.objects.filter(user=user).exclude(thread_id__in=thread_ids).delete()
 
@@ -119,8 +127,8 @@ def sync_state_to_database(user, state: dict) -> None:
 
         ct.messages_rows.all().delete()
         msgs = tdata.get("messages") or []
-        if len(msgs) > CHAT_MESSAGES_PER_THREAD_MAX:
-            msgs = msgs[-CHAT_MESSAGES_PER_THREAD_MAX:]
+        if len(msgs) > msgs_cap:
+            msgs = msgs[-msgs_cap:]
         bulk: list[ChatMessage] = []
         for i, m in enumerate(msgs):
             bulk.append(
@@ -183,7 +191,10 @@ def get_chat_state(request) -> dict:
         state = load_state_from_database(request.user)
         if state is None:
             state = default_chat_state()
-            sync_state_to_database(request.user, state)
+            from assistant.local_request import get_chat_limits_for_request
+
+            mmax, tc = get_chat_limits_for_request(request)
+            sync_state_to_database(request.user, state, messages_per_thread_max=mmax, threads_max=tc)
         state = _apply_session_active_tid(request, state)
         return normalize_state(state)
 
@@ -199,13 +210,21 @@ def get_chat_state(request) -> dict:
 
 
 def save_chat_state(request, state: dict) -> None:
+    from assistant.local_request import get_chat_limits_for_request
+
     state = normalize_state(state)
+    msg_max, thr_max = get_chat_limits_for_request(request)
     if request.user.is_authenticated:
-        sync_state_to_database(request.user, state)
+        sync_state_to_database(
+            request.user,
+            state,
+            messages_per_thread_max=msg_max,
+            threads_max=thr_max,
+        )
         request.session[CHAT_DB_ACTIVE_KEY] = state["active_id"]
         request.session.modified = True
         return
-    trim_thread_list(state)
+    trim_thread_list(state, threads_max=thr_max)
     _save_session_state(request, state)
 
 
@@ -214,6 +233,10 @@ def merge_guest_session_into_user(request, user) -> None:
     Перед login(): переносит гостевое состояние из сессии в аккаунт.
     Если в сессии только пустой новый чат — не трогаем БД.
     """
+    from assistant.local_request import get_chat_limits_for_request
+
+    mmax, tc = get_chat_limits_for_request(request)
+
     _migrate_legacy_session_if_needed(request)
     raw_sess = request.session.pop(CHAT_STATE_KEY, None)
 
@@ -230,9 +253,6 @@ def merge_guest_session_into_user(request, user) -> None:
                 have_guest = True
             if lone.get("focus_event_id") is not None:
                 have_guest = True
-
-
-        return
 
     db_state = load_state_from_database(user)
 
@@ -271,7 +291,7 @@ def merge_guest_session_into_user(request, user) -> None:
         seen = set(prefix)
         tail = [x for x in new_order if x not in seen]
         merged_order = prefix + tail
-        while len(merged_order) > CHAT_THREADS_MAX:
+        while len(merged_order) > tc:
             dropped = merged_order.pop()
             new_threads.pop(dropped, None)
 
@@ -283,6 +303,6 @@ def merge_guest_session_into_user(request, user) -> None:
             "threads": new_threads,
         })
 
-    sync_state_to_database(user, final)
+    sync_state_to_database(user, final, messages_per_thread_max=mmax, threads_max=tc)
     request.session[CHAT_DB_ACTIVE_KEY] = final["active_id"]
     request.session.modified = True

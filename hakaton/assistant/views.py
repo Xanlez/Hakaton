@@ -2,22 +2,33 @@ import json
 import logging
 from pathlib import Path
 
-from django.http import Http404, JsonResponse
+from django.contrib import messages
+from django.core.paginator import Paginator
+from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone as dj_tz
 from django.views.decorators.http import require_POST
 from django.views.generic import TemplateView
 
+from assistant.local_request import (
+    get_chat_limits_for_request,
+    request_is_loopback,
+    trim_chat_threads_for_request,
+)
 from assistant.chat_storage import (
-    CHAT_MESSAGES_PER_THREAD_MAX,
     get_chat_state,
     new_thread_uid,
     save_chat_state,
-    trim_thread_list,
 )
 from assistant.chat_threads import finalize_thread_title, last_time_label, thread_preview
 from assistant.formatting import assistant_reply_html, clean_assistant_visible
+from assistant.gigachat_plan_prefs import (
+    LOCAL_GIGACHAT_SESSION_SLUG_KEY,
+    allowed_plan_slugs,
+    gigachat_client_kw_for_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +42,30 @@ def _backend_db_path() -> str:
     return str(p if p.is_absolute() else _REPO_ROOT / DB_PATH)
 
 
-def _events_for_template(db_path: str) -> list[dict]:
+def _events_for_template(db_path: str, *, search: str | None = None) -> list[dict]:
     from database import event_time, init_db
 
     conn = init_db(db_path)
-    rows = conn.execute(
-        """SELECT event_id, event_name, event_start_date, event_start_time, event_end_time,
-                  is_all_day, afisha_type_name, event_place, image_url, event_description
-           FROM events
-           ORDER BY event_start_date, event_start_time, event_id"""
-    ).fetchall()
+    query = """SELECT event_id, event_name, event_start_date, event_start_time, event_end_time,
+                      is_all_day, afisha_type_name, event_place, image_url, event_description
+               FROM events"""
+    params: tuple[str, ...] = ()
+    term = (search or "").strip().lower()
+    if term:
+        esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        needle = f"%{esc}%"
+        query += """
+               WHERE (
+                   lower(IFNULL(event_name, '')) LIKE ? ESCAPE '\\'
+                   OR lower(IFNULL(event_place, '')) LIKE ? ESCAPE '\\'
+                   OR lower(IFNULL(afisha_type_name, '')) LIKE ? ESCAPE '\\'
+                   OR lower(IFNULL(event_description, '')) LIKE ? ESCAPE '\\'
+               )
+        """
+        params = (needle, needle, needle, needle)
+    query += " ORDER BY event_start_date, event_start_time, event_id"
+
+    rows = conn.execute(query, params).fetchall()
     conn.close()
     out: list[dict] = []
     for r in rows:
@@ -64,6 +89,15 @@ def _events_for_template(db_path: str) -> list[dict]:
             "has_description": bool(desc_full),
         })
     return out
+
+
+def _events_table_nonempty(db_path: str) -> bool:
+    from database import init_db
+
+    conn = init_db(db_path)
+    row = conn.execute("SELECT 1 FROM events LIMIT 1").fetchone()
+    conn.close()
+    return row is not None
 
 
 def _event_detail_dict(db_path: str, event_id: int) -> dict | None:
@@ -122,15 +156,19 @@ def _append_turn_to_thread(request, thread_id: str, user_text: str, assistant_te
         clean_assistant_visible(assistant_text) if (assistant_text or "").strip() else assistant_text
     )
     msgs.append({"role": "assistant", "text": clean_ai, "time": ta})
-    overflow = len(msgs) - CHAT_MESSAGES_PER_THREAD_MAX
+    msg_cap, _ = get_chat_limits_for_request(request)
+    overflow = len(msgs) - msg_cap
     if overflow > 0:
         msgs = msgs[overflow:]
     thread["messages"] = msgs
     finalize_thread_title(thread, msgs)
     state["order"] = [thread_id] + [x for x in state["order"] if x != thread_id]
     state["active_id"] = thread_id
-    trim_thread_list(state)
+    trim_chat_threads_for_request(request, state)
     save_chat_state(request, state)
+
+
+AFISHA_PAGE_SIZE = 12
 
 
 class AfishaView(TemplateView):
@@ -140,15 +178,29 @@ class AfishaView(TemplateView):
         context = super().get_context_data(**kwargs)
         context["nav_section"] = "afisha"
         db_path = _backend_db_path()
+        search = (self.request.GET.get("q") or "").strip()
+        context["search_query"] = search
+
         try:
             from chat import ensure_db
 
             ensure_db(db_path, force=False)
         except (RuntimeError, ValueError) as e:
             context["events"] = []
+            context["page_obj"] = None
             context["afisha_error"] = str(e)
             return context
-        context["events"] = _events_for_template(db_path)
+
+        events = _events_for_template(db_path, search=search or None)
+        paginator = Paginator(events, AFISHA_PAGE_SIZE)
+        context["page_obj"] = paginator.get_page(self.request.GET.get("page"))
+        context["events"] = list(context["page_obj"].object_list)
+
+        if events:
+            context["events_db_nonempty"] = True
+        else:
+            context["events_db_nonempty"] = _events_table_nonempty(db_path)
+
         return context
 
 
@@ -207,11 +259,11 @@ class ChatView(TemplateView):
                 tid = new_thread_uid()
 
             event_name = (row["event_name"] or "").strip() or f"Событие #{eid}"
-            intro = ""
             try:
                 from gigachat_advisor import introduce_event
 
-                intro = introduce_event(db_path, eid)
+                gk = gigachat_client_kw_for_request(request)
+                intro, _ = introduce_event(db_path, eid, giga_kw=gk)
             except Exception as ex:
                 logger.warning("introduce_event failed: %s", ex)
                 from gigachat_advisor import fallback_event_intro
@@ -230,7 +282,7 @@ class ChatView(TemplateView):
             state["threads"][tid] = thread
             state["order"].insert(0, tid)
             state["active_id"] = tid
-            trim_thread_list(state)
+            trim_chat_threads_for_request(request, state)
             save_chat_state(request, state)
             return redirect(f"{reverse('assistant:chat')}?chat={tid}")
 
@@ -242,7 +294,7 @@ class ChatView(TemplateView):
             state["threads"][tid] = {"title": "Новый чат", "messages": []}
             state["order"].insert(0, tid)
             state["active_id"] = tid
-            trim_thread_list(state)
+            trim_chat_threads_for_request(request, state)
             save_chat_state(request, state)
             return redirect(f"{reverse('assistant:chat')}?chat={tid}")
 
@@ -283,6 +335,28 @@ class ChatView(TemplateView):
         context["chat_clear_url"] = reverse("assistant:chat_clear")
         context["chat_new_url"] = f"{reverse('assistant:chat')}?new=1"
         return context
+
+
+@require_POST
+def local_gigachat_plan(request):
+    """Сохраняет модель для локального доступа из блока под чатом (только loopback)."""
+    if not request_is_loopback(request):
+        return HttpResponseForbidden("Доступно только при локальном доступе (loopback).")
+    slug = (request.POST.get("plan_slug") or "").strip()
+    if slug not in allowed_plan_slugs():
+        messages.error(request, "Неизвестная модель GigaChat.")
+    else:
+        request.session[LOCAL_GIGACHAT_SESSION_SLUG_KEY] = slug
+        request.session.modified = True
+        messages.success(request, "Выбрана модель GigaChat для локального доступа (сессия).")
+    next_url = (request.POST.get("next") or "").strip()
+    if not url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        next_url = reverse("assistant:afisha")
+    return HttpResponseRedirect(next_url)
 
 
 @require_POST
@@ -329,11 +403,13 @@ def chat_api(request):
         if focus is not None:
             from gigachat_advisor import chat_about_event
 
-            reply = chat_about_event(message, db_path, int(focus), prior)
+            gk = gigachat_client_kw_for_request(request)
+            reply, _ = chat_about_event(message, db_path, int(focus), prior, giga_kw=gk)
         else:
-            from gigachat_advisor import recommend_events
+            from gigachat_advisor import recommend_events_with_usage
 
-            reply = recommend_events(message, db_path)
+            gk = gigachat_client_kw_for_request(request)
+            reply, _ = recommend_events_with_usage(message, db_path, giga_kw=gk)
     except Exception as e:
         logger.exception("chat_api")
         err_msg = str(e)

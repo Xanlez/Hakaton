@@ -114,44 +114,55 @@
                 {% endif %}
             </div>
 
-            <form
-                class="chat-composer bg-surface"
-                id="chat-form"
-                data-chat-api="{{ chat_api_url }}"
-                data-chat-id="{{ active_chat_id }}"
-                action="{% url 'assistant:chat' %}?chat={{ active_chat_id }}"
-                method="post"
-                novalidate
-            >
-                {% csrf_token %}
-                <div class="chat-composer__field">
-                    <label for="chat-input" class="visually-hidden">Ваш вопрос</label>
-                    <textarea
-                        id="chat-input"
-                        name="message"
-                        class="chat-composer__input"
-                        rows="1"
-                        placeholder="Напишите вопрос…"
-                        autocomplete="off"
-                        maxlength="4000"
-                        aria-describedby="chat-hint"
-                    ></textarea>
-                    <span id="chat-hint" class="chat-composer__hint text-additional">
-                        Enter — отправить, Shift+Enter — новая строка.
-                        {% if thread_focus_event_id %}
-                            Ответы только по карточке этого мероприятия.
-                        {% else %}
-                            Ответ по полному списку афиши и GigaChat.
-                        {% endif %}
-                    </span>
-                </div>
-                <button type="submit" class="chat-composer__submit bg-primary" id="chat-submit" disabled>
+            <div class="chat-composer bg-surface">
+                <form
+                    class="chat-composer__msg-form"
+                    id="chat-form"
+                    data-chat-api="{{ chat_api_url }}"
+                    data-chat-id="{{ active_chat_id }}"
+                    action="{% url 'assistant:chat' %}?chat={{ active_chat_id }}"
+                    method="post"
+                    novalidate
+                >
+                    {% csrf_token %}
+                    <div class="chat-composer__field">
+                        <label for="chat-input" class="visually-hidden">Ваш вопрос</label>
+                        <textarea
+                            id="chat-input"
+                            name="message"
+                            class="chat-composer__input"
+                            rows="1"
+                            placeholder="Напишите вопрос…"
+                            autocomplete="off"
+                            maxlength="4000"
+                            aria-describedby="chat-hint"
+                        ></textarea>
+                        <span id="chat-hint" class="chat-composer__hint text-additional">
+                            Enter — отправить, Shift+Enter — новая строка.
+                            {% if thread_focus_event_id %}
+                                Ответы только по карточке этого мероприятия.
+                            {% else %}
+                                Ответ по полному списку афиши и GigaChat.
+                            {% endif %}
+                        </span>
+                    </div>
+                </form>
+                {% if show_local_gigachat_banner %}
+                    {% include "assistant/partials/local_gigachat_banner.html" %}
+                {% endif %}
+                <button
+                    type="submit"
+                    form="chat-form"
+                    class="chat-composer__submit bg-primary"
+                    id="chat-submit"
+                    disabled
+                >
                     <span>Отправить</span>
                     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
-            </form>
+            </div>
         </div>
     </section>
 </div>

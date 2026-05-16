@@ -38,6 +38,12 @@ class User(AbstractUser):
 
     username = models.CharField(_("display name"), max_length=150, blank=True)
     email = models.EmailField(_("email address"), unique=True)
+    gigachat_plan_slug = models.CharField(
+        _("GigaChat plan"),
+        max_length=32,
+        default="gigachat",
+        help_text="Модель GigaChat для чата (slug из settings.GIGACHAT_PLAN_OPTIONS).",
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: list[str] = []

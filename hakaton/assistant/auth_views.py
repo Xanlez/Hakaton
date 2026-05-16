@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login
+from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.views import LoginView as DjangoLoginView
@@ -13,6 +14,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse_lazy
 from django.utils import timezone as dj_tz
+from django.views.decorators.http import require_POST
 from django.views.generic import TemplateView
 from django.views.generic.edit import FormView
 
@@ -166,7 +168,33 @@ class CabinetView(LoginRequiredMixin, TemplateView):
         ctx = super().get_context_data(**kwargs)
         ctx["nav_section"] = "cabinet"
         ctx["saved_thread_count"] = ChatThread.objects.filter(user=self.request.user).count()
+
+        from assistant.gigachat_plan_prefs import (
+            enrich_plans_with_balance,
+            gigachat_client_kw_for_request,
+            plan_options_ordered,
+        )
+        from gigachat_advisor import gigachat_api_balance_entries
+
+        gkw = gigachat_client_kw_for_request(self.request)
+        api_rows, api_err = gigachat_api_balance_entries(giga_kw=gkw)
+        ctx["gigachat_plan_options"] = enrich_plans_with_balance(plan_options_ordered(), api_rows)
+        ctx["gigachat_balance_error"] = api_err
+        ctx["gigachat_effective_scope"] = gkw.get("scope", "")
+        ctx["gigachat_effective_model"] = gkw.get("model", "")
+
         return ctx
+
+
+@login_required
+@require_POST
+def cabinet_save_gigachat_plan(request: HttpRequest) -> HttpResponse:
+    messages.info(
+        request,
+        "Модель при локальном доступе задаётся в чате, между строкой ввода и «Отправить». "
+        "(127.0.0.1 и т.п.). С внешнего доступа для всех действует связка из .env.",
+    )
+    return redirect("assistant:cabinet")
 
 
 class AuthLogoutView(DjangoLogoutView):

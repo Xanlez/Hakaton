@@ -7,7 +7,7 @@ from assistant.models import ChatMessage, ChatThread, PendingRegistration, User
 @admin.register(User)
 class UserAdmin(DjangoUserAdmin):
     ordering = ("email",)
-    list_display = ("email", "username", "is_staff", "is_active")
+    list_display = ("email", "username", "gigachat_plan_slug", "is_staff", "is_active")
     search_fields = ("email", "username", "first_name", "last_name")
     readonly_fields = ("last_login", "date_joined")
 
@@ -16,6 +16,10 @@ class UserAdmin(DjangoUserAdmin):
         (
             "Профиль",
             {"fields": ("username", "first_name", "last_name")},
+        ),
+        (
+            "GigaChat (режим в ЛК)",
+            {"fields": ("gigachat_plan_slug",)},
         ),
         (
             "Права",

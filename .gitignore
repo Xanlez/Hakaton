@@ -1,4 +1,5 @@
 *.db
+hakaton/logs/
 .env
 api_sample.json
 _docx_extract.txt
