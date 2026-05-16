@@ -5,6 +5,15 @@ from database import count_events, init_db, latest_synced_at, save_events
 from fetch_events import fetch_event_list, parse_events
 
 
+def ensure_db(db_path: str = DB_PATH, force: bool = False) -> None:
+    """Подтянуть афишу из API, если БД пуста или запрошено force."""
+    conn = init_db(db_path)
+    empty = count_events(conn) == 0
+    conn.close()
+    if empty or force:
+        sync(db_path)
+
+
 def sync(db_path: str = DB_PATH) -> tuple[int, int, str | None]:
     events = parse_events(fetch_event_list())
     conn = init_db(db_path)

@@ -64,15 +64,28 @@ def decrypt_pending_password_hash(stored: str) -> str:
     return f.decrypt(stored[len(PW_CIPHER_PREFIX) :].encode("ascii")).decode("utf-8")
 
 
-def rotate_pending_registration_token(pending) -> str:
+def rotate_pending_registration_token(
+    pending,
+    *,
+    username: str | None = None,
+    password_hash: str | None = None,
+) -> str:
     """
-    Новый секрет для ссылки; старая ссылка перестаёт работать.
-    Использовать при повторной отправке письма и т.п.
+    Новый секрет для ссылки; все ранее выданные ссылки перестают работать.
+    При повторной регистрации можно обновить username и Django-хэш пароля.
     """
     raw, digest = new_registration_token_pair()
     pending.token_digest = digest
-    pending.password_hash = encrypt_pending_password_hash(
-        decrypt_pending_password_hash(pending.password_hash),
-    )
-    pending.save(update_fields=["token_digest", "password_hash"])
+    if username is not None:
+        pending.username = username
+    if password_hash is not None:
+        pending.password_hash = encrypt_pending_password_hash(password_hash)
+    else:
+        pending.password_hash = encrypt_pending_password_hash(
+            decrypt_pending_password_hash(pending.password_hash),
+        )
+    update_fields = ["token_digest", "password_hash"]
+    if username is not None:
+        update_fields.append("username")
+    pending.save(update_fields=update_fields)
     return raw

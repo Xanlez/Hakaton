@@ -17,12 +17,12 @@ urlpatterns = [
     path('chat/', views.ChatView.as_view(), name='chat'),
     path('api/chat/', views.chat_api, name='api_chat'),
     path('cabinet/', auth_views.CabinetView.as_view(), name='cabinet'),
-    path(
-        'cabinet/gigachat-plan/',
-        auth_views.cabinet_save_gigachat_plan,
-        name='cabinet_plan',
-    ),
     path('accounts/register/done/', auth_views.AuthRegisterDoneView.as_view(), name='register_done'),
+    path(
+        'accounts/register/resend/',
+        auth_views.resend_registration_email,
+        name='register_resend',
+    ),
     path('accounts/confirm/<str:token>/', auth_views.confirm_registration, name='confirm_registration'),
     path('accounts/login/', auth_views.AuthLoginView.as_view(), name='login'),
     path('accounts/register/', auth_views.AuthRegisterView.as_view(), name='register'),

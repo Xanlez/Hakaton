@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+docs/*.docx
+54ka.aisa.ru/

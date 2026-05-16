@@ -3,18 +3,9 @@ import argparse
 import sys
 
 from config import DB_PATH
-from database import count_events, init_db
 from gigachat_advisor import recommend_events
-from sync_afisha import sync
+from sync_afisha import ensure_db
 from utils import setup_utf8
-
-
-def ensure_db(db_path: str, force: bool) -> None:
-    conn = init_db(db_path)
-    empty = count_events(conn) == 0
-    conn.close()
-    if empty or force:
-        sync(db_path)
 
 
 def ask(query: str, db_path: str) -> None:

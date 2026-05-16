@@ -15,6 +15,12 @@
         <p class="auth-foot text-additional">
             Нет письма через пару минут? Загляните в спам или уточните настройки SMTP у администратора сайта (в режиме разработки письма часто только в консоли сервера).
         </p>
+        <form method="post" action="{% url 'assistant:register_resend' %}" class="auth-resend" style="margin-top: 1.25rem;">
+            {% csrf_token %}
+            <p class="auth-foot text-secondary" style="margin-bottom: 0.5rem;">Отправить ссылку ещё раз (предыдущая перестанет работать):</p>
+            {{ resend_form.email }}
+            <button type="submit" class="btn btn--primary" style="margin-top: 0.75rem; width: 100%;">Выслать письмо снова</button>
+        </form>
         <p class="auth-foot text-additional">
             <a href="{% url 'assistant:register' %}" class="text-primary">Другая почта или повторная регистрация</a>
             · <a href="{% url 'assistant:afisha' %}" class="text-secondary">На афишу</a>

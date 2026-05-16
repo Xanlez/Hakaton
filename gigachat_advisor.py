@@ -257,20 +257,6 @@ def _chat_for_about_event(
     return Chat(messages=built)
 
 
-def chat_about_event(
-    user_message: str,
-    db_path: str,
-    event_id: int,
-    history: list[dict],
-    *,
-    giga_kw: dict[str, Any] | None = None,
-) -> tuple[str, int]:
-    chat = _chat_for_about_event(
-        user_message, db_path, event_id, history, giga_kw=giga_kw
-    )
-    return _chat_execute(chat, giga_kw=giga_kw)
-
-
 def chat_about_event_stream(
     user_message: str,
     db_path: str,

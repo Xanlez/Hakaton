@@ -164,12 +164,6 @@ def classify_chat_backend_failure(exc: BaseException) -> tuple[str, str]:
     )
 
 
-def json_error_chat_payload(exc: BaseException) -> dict[str, Any]:
-    """Поля для NDJSON ошибки или JSON ответа API чата."""
-    message, code = classify_chat_backend_failure(exc)
-    return {"type": "error", "message": message, "code": code}
-
-
 def ndjson_chat_error_line_bytes(exc: BaseException) -> bytes:
     """Одна NDJSON-строка ошибки потока / API с готовым HTML для пузырька."""
     from assistant.formatting import assistant_reply_html, clean_assistant_visible

@@ -54,3 +54,15 @@ class RegisterForm(UserCreationForm):
         if User.objects.filter(email__iexact=email).exists():
             raise ValidationError("Этот адрес почты уже зарегистрирован.")
         return email
+
+
+class ResendRegistrationForm(forms.Form):
+    """Повторная отправка письма с подтверждением (с ротацией токена ссылки)."""
+
+    email = forms.EmailField(
+        label="Электронная почта",
+        widget=forms.EmailInput(attrs={"autocomplete": "email"}),
+    )
+
+    def clean_email(self):
+        return (self.cleaned_data.get("email") or "").strip().lower()

@@ -4,11 +4,11 @@ from datetime import timedelta
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login
-from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.views import LoginView as DjangoLoginView
 from django.contrib.auth.views import LogoutView as DjangoLogoutView
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
@@ -20,18 +20,22 @@ from django.views.generic.edit import FormView
 
 from assistant.chat_storage import merge_guest_session_into_user
 from assistant.email_activation import send_pending_registration_email
+
 from assistant.registration_tokens import (
     decrypt_pending_password_hash,
     encrypt_pending_password_hash,
     new_registration_token_pair,
     registration_token_digest,
+    rotate_pending_registration_token,
 )
-from assistant.forms import AuthLoginForm, RegisterForm
+from assistant.forms import AuthLoginForm, RegisterForm, ResendRegistrationForm
 from assistant.models import PendingRegistration
 
 logger = logging.getLogger(__name__)
 
 PENDING_LINK_MAX_AGE = timedelta(hours=72)
+PENDING_REGISTRATION_EMAIL_SESSION_KEY = "pending_registration_email"
+RESEND_REGISTRATION_COOLDOWN_SEC = 60
 
 
 class AuthLoginView(DjangoLoginView):
@@ -63,15 +67,22 @@ class AuthRegisterView(FormView):
         email = (form.cleaned_data["email"] or "").strip().lower()
         raw_password = form.cleaned_data["password1"]
 
-        PendingRegistration.objects.filter(email__iexact=email).delete()
-
-        plain_token, token_digest = new_registration_token_pair()
-        pending = PendingRegistration.objects.create(
-            username=username,
-            email=email,
-            password_hash=encrypt_pending_password_hash(make_password(raw_password)),
-            token_digest=token_digest,
-        )
+        password_hash = make_password(raw_password)
+        pending = PendingRegistration.objects.filter(email__iexact=email).first()
+        if pending is not None:
+            plain_token = rotate_pending_registration_token(
+                pending,
+                username=username,
+                password_hash=password_hash,
+            )
+        else:
+            plain_token, token_digest = new_registration_token_pair()
+            pending = PendingRegistration.objects.create(
+                username=username,
+                email=email,
+                password_hash=encrypt_pending_password_hash(password_hash),
+                token_digest=token_digest,
+            )
 
         try:
             send_pending_registration_email(
@@ -80,9 +91,11 @@ class AuthRegisterView(FormView):
                 email=pending.email,
                 token=plain_token,
             )
+            self.request.session[PENDING_REGISTRATION_EMAIL_SESSION_KEY] = email
             messages.success(
                 self.request,
-                "На почту отправлена ссылка. Аккаунт появится только после перехода по ней.",
+                "На почту отправлена ссылка. Аккаунт появится только после перехода по ней. "
+                "Ранее выданные ссылки для этой почты больше не действуют.",
             )
         except Exception as exc:
             logger.exception("send_pending_registration_email failed for pending %s", pending.pk)
@@ -106,7 +119,56 @@ class AuthRegisterDoneView(TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx["nav_section"] = "register"
+        initial_email = self.request.session.get(PENDING_REGISTRATION_EMAIL_SESSION_KEY, "")
+        ctx["resend_form"] = ResendRegistrationForm(initial={"email": initial_email})
         return ctx
+
+
+@require_POST
+def resend_registration_email(request: HttpRequest) -> HttpResponse:
+    form = ResendRegistrationForm(request.POST)
+    if not form.is_valid():
+        for err in form.errors.get("email", form.non_field_errors()):
+            messages.error(request, err)
+        return redirect("assistant:register_done")
+
+    email = form.cleaned_data["email"]
+    throttle_key = f"assistant:resend_reg:{email}"
+    if cache.get(throttle_key):
+        messages.info(
+            request,
+            "Письмо уже отправляли недавно. Подождите около минуты или проверьте папку «Спам».",
+        )
+        return redirect("assistant:register_done")
+
+    pending = PendingRegistration.objects.filter(email__iexact=email).first()
+    if pending is not None:
+        plain_token = rotate_pending_registration_token(pending)
+        try:
+            send_pending_registration_email(
+                request,
+                username=pending.username,
+                email=pending.email,
+                token=plain_token,
+            )
+            cache.set(throttle_key, 1, RESEND_REGISTRATION_COOLDOWN_SEC)
+            request.session[PENDING_REGISTRATION_EMAIL_SESSION_KEY] = email
+            logger.info("registration email resent (token rotated) for pending pk=%s", pending.pk)
+        except Exception as exc:
+            logger.exception("resend_pending_registration_email failed for pending %s", pending.pk)
+            tail = f" ({type(exc).__name__}: {exc})" if settings.DEBUG else ""
+            messages.error(
+                request,
+                "Не удалось отправить письмо. Проверьте SMTP или настройки DJANGO_EMAIL_*." + tail,
+            )
+            return redirect("assistant:register_done")
+
+    messages.success(
+        request,
+        "Если на этот адрес есть незавершённая регистрация, отправлена новая ссылка. "
+        "Старые ссылки из писем больше не действуют.",
+    )
+    return redirect("assistant:register_done")
 
 
 def confirm_registration(request: HttpRequest, token: str) -> HttpResponse:
@@ -184,17 +246,6 @@ class CabinetView(LoginRequiredMixin, TemplateView):
         ctx["gigachat_effective_model"] = gkw.get("model", "")
 
         return ctx
-
-
-@login_required
-@require_POST
-def cabinet_save_gigachat_plan(request: HttpRequest) -> HttpResponse:
-    messages.info(
-        request,
-        "Модель при локальном доступе задаётся в чате, между строкой ввода и «Отправить». "
-        "(127.0.0.1 и т.п.). С внешнего доступа для всех действует связка из .env.",
-    )
-    return redirect("assistant:cabinet")
 
 
 class AuthLogoutView(DjangoLogoutView):

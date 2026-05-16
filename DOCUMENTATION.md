@@ -1,11 +1,13 @@
 # Документация проекта «Афиша Sirius + помощник»
 
-Веб-приложение на Django с каталогом мероприятий и чатом на базе GigaChat. Данные афиши подтягиваются с API «Сириус» и хранятся в локальной SQLite (`afisha.db`). Отдельная база Django (`hakaton/db.sqlite3`) используется для пользователей и сохранённых чатов.
+Веб-приложение на Django с каталогом мероприятий и чатом на базе GigaChat. Данные афиши подтягиваются с API «Сириус» и хранятся в локальной SQLite (`afisha.db`). Отдельная база Django (`hakaton/db.sqlite3`) — пользователи, сохранённые чаты и заявки на регистрацию.
+
+Печатные версии: **`docs/DOCUMENTATION.docx`**, **`docs/HOW_IT_WORKS.docx`** (собираются скриптом `scripts/build_docs_docx.py`).
 
 ## Требования
 
-- Python 3.11+ (рекомендуется актуальный стабильный релиз).
-- Зависимости из `requirements.txt`: Django 6.x, `gigachat`, `python-dotenv`.
+- Python 3.11+.
+- Зависимости: `requirements.txt` — Django 6.x, `gigachat`, `python-dotenv`, `cryptography` (шифрование пароля в заявке на регистрацию).
 
 ## Установка
 
@@ -16,41 +18,48 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Создайте файл `.env` в **корне репозитория** (рядом с `config.py`). Минимально для чата и рекомендаций нужны учётные данные GigaChat:
+Файл **`.env`** в корне репозитория (рядом с `config.py`).
+
+### GigaChat (обязательно для чата)
 
 ```env
 GIGACHAT_CREDENTIALS=...
-```
-
-Опционально:
-
-```env
 GIGACHAT_SCOPE=GIGACHAT_API_PERS
 GIGACHAT_MODEL=GigaChat
 GIGACHAT_CA_BUNDLE_FILE=
 GIGACHAT_VERIFY_SSL_CERTS=true
 ```
 
-### Логи Django (файл + консоль)
+### Логи Django
 
-По умолчанию включена ротация лог‑файла с подстановкой активного пользователя в каждую запись (`user_repr`; для гостя — аноним / ID сессии). Путь можно переопределить:
+В каждой строке лога — идентификатор пользователя (`user_repr`). Ротация файла:
 
 ```env
 DJANGO_LOG_LEVEL=INFO
-# или совместимо: LOG_LEVEL=INFO
-
 DJANGO_LOG_FILE=logs/django.log
 DJANGO_LOG_MAX_BYTES=5242880
 DJANGO_LOG_BACKUP_COUNT=5
 ```
 
-Путь задаётся относительно каталога `hakaton/` (где лежит `manage.py`). Каталог для файла создаётся автоматически.
+Путь относительно каталога `hakaton/` (`manage.py`). По умолчанию: `hakaton/logs/django.log`.
 
-Ответ **`POST /api/chat/`** всегда отдаётся **потоком** (`application/x-ndjson`): по мере генерации приходят фрагменты текста, затем финальное HTML‑содержимое пузырька или ошибка с полем **`code`**. Контракт и обработка сбоев GigaChat описаны в **`HOW_IT_WORKS.md`**.
+### Афиша
 
-Параметры загрузки афиши и путь к файлу БД афиши задаются в `config.py` (`API_URL`, `DB_PATH`, `SYNC_INTERVAL_SEC`). По умолчанию файл БД — `afisha.db` в корне проекта.
+В `config.py`: `API_URL`, `DB_PATH`, `SYNC_INTERVAL_SEC`. По умолчанию БД — `afisha.db` в корне.
 
-## Запуск веб-приложения (Django)
+### Локальный доступ (опционально)
+
+При обращении с loopback (127.0.0.1 и т.п.) можно включить упрощённый промпт и выбор модели в чате:
+
+```env
+ASSISTANT_LOCAL_LL_SIMPLE=true
+ASSISTANT_LOCAL_RELAX_CHAT_LIMITS=true
+ASSISTANT_LOCAL_GIGACHAT_BANNER=true
+CHAT_LOCAL_MESSAGES_PER_THREAD_MAX=240
+CHAT_LOCAL_THREADS_MAX=60
+```
+
+## Запуск веб-приложения
 
 ```bash
 cd hakaton
@@ -58,78 +67,79 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Откройте в браузере адрес, который выведет `runserver` (обычно `http://127.0.0.1:8000/`).
+Браузер: обычно `http://127.0.0.1:8000/`.
 
 ### Почта и регистрация
 
-Регистрация отправляет письмо с ссылкой активации. В режиме разработки по умолчанию письма выводятся в консоль сервера (`django.core.mail.backends.console.EmailBackend`). Для SMTP задайте переменные окружения (см. комментарии в `hakaton/hakaton/settings.py`):
+1. Пользователь заполняет форму на `/accounts/register/`.
+2. На почту уходит ссылка вида `/accounts/confirm/<токен>/`. В БД хранится только **отпечаток** токена (HMAC), не сама ссылка.
+3. При повторной регистрации на ту же почту или при **«Выслать письмо снова»** (`POST /accounts/register/resend/`) выдается **новый** токен — старые ссылки из писем **недействительны** (ротация).
+4. Повторная отправка письма — не чаще одного раза в ~60 секунд на адрес.
+5. После перехода по ссылке создаётся активный пользователь, заявка удаляется.
 
-- `DJANGO_EMAIL_BACKEND`
-- `DJANGO_EMAIL_HOST`, `DJANGO_EMAIL_PORT`, и при необходимости пользователь/пароль/TLS/SSL
-- `DJANGO_DEFAULT_FROM_EMAIL`
+В разработке письма часто только в консоли (`console.EmailBackend`). Для SMTP — переменные в `hakaton/hakaton/settings.py`: `DJANGO_EMAIL_*` или `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` в `.env`.
 
-## Обновление афиши в фоне (CLI)
+Срок жизни ссылки подтверждения: **72 часа** (см. `PENDING_LINK_MAX_AGE` в `auth_views.py`).
 
-Скрипт `main.py` периодически синхронизирует API → SQLite:
+## Обновление афиши (CLI)
 
 ```bash
 python main.py --once
-```
-
-Один раз загрузить данные и выйти.
-
-```bash
 python main.py
-```
-
-Цикл с интервалом по умолчанию (`SYNC_INTERVAL_SEC`, обычно 3600 секунд). Свой интервал:
-
-```bash
 python main.py --interval 1800
-```
-
-Другой файл БД:
-
-```bash
 python main.py --db путь\к\afisha.db --once
 ```
 
-Если БД пуста, при первом обращении к афише или чату через сайт также выполняется синхронизация (см. `chat.ensure_db`).
+Если `afisha.db` пуста, сайт при первом обращении к афише или чату вызовет `sync_afisha.ensure_db`.
 
-## Консольный чат без браузера
+## Консольный чат
 
 ```bash
 python chat.py
-```
-
-Интерактивный режим. Одноразовый вопрос:
-
-```bash
 python chat.py "что посмотреть на выходных?"
-```
-
-Перед ответом принудительно обновить афишу:
-
-```bash
 python chat.py --sync "вечерние события"
 ```
 
-## Где какие файлы данных
+## Файлы данных
 
 | Файл | Назначение |
 |------|------------|
-| `afisha.db` | События афиши (общая БД для CLI и Django). |
-| `hakaton/db.sqlite3` | Пользователи Django, потоки чатов и сообщения для залогиненных. |
+| `afisha.db` | События афиши (CLI + Django). |
+| `hakaton/db.sqlite3` | Пользователи, потоки и сообщения чата. |
+| `hakaton/logs/django.log` | Журнал приложения (ротация по размеру). |
 
-Не коммитьте продакшен-секреты и персональные `.env`; для деплоя используйте переменные окружения на сервере.
+Не коммитьте `.env` и секреты.
 
-## Полезные URL (приложение `assistant`)
+## URL приложения `assistant`
 
-- `/` — список событий (афиша).
-- `/event/<id>/` — карточка мероприятия.
-- `/chat/` — чат-помощник.
-- `/cabinet/` — личный кабинет (нужна авторизация).
-- `/accounts/register/`, `/accounts/login/`, `/accounts/logout/` — регистрация и вход.
-- `/admin/` — админка Django.
+| URL | Описание |
+|-----|----------|
+| `/` | Афиша |
+| `/event/<id>/` | Карточка мероприятия |
+| `/chat/` | Чат-помощник |
+| `/chat/?event=<id>` | Новый чат по событию |
+| `/api/chat/` | API чата (POST, поток NDJSON) |
+| `/cabinet/` | Личный кабинет |
+| `/accounts/register/` | Регистрация |
+| `/accounts/register/done/` | «Письмо отправлено» + повторная отправка |
+| `/accounts/register/resend/` | POST: повторное письмо (ротация токена) |
+| `/accounts/confirm/<token>/` | Подтверждение регистрации |
+| `/accounts/login/`, `/logout/` | Вход / выход |
+| `/admin/` | Админка Django |
 
-Подробнее о внутреннем устройстве см. файл `HOW_IT_WORKS.md`.
+### API чата (кратко)
+
+`POST /api/chat/` с JSON: `message`, `chat_id`. Ответ — поток **`application/x-ndjson`**: строки `delta` (фрагмент текста), `done` (итог + `reply_html`) или `error` (`message`, `code`). Подробности — в **`HOW_IT_WORKS.md`** и **`docs/HOW_IT_WORKS.docx`**.
+
+## Сборка DOCX
+
+```bash
+pip install python-docx
+python scripts/build_docs_docx.py
+```
+
+Результат: каталог **`docs/`**.
+
+## См. также
+
+- **`HOW_IT_WORKS.md`** / **`docs/HOW_IT_WORKS.docx`** — архитектура, потоки, модули, ошибки GigaChat.

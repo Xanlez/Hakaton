@@ -52,6 +52,12 @@ def _backend_db_path() -> str:
     return str(p if p.is_absolute() else _REPO_ROOT / DB_PATH)
 
 
+def _ensure_afisha_db(db_path: str, *, force: bool = False) -> None:
+    from sync_afisha import ensure_db
+
+    ensure_db(db_path, force)
+
+
 def _events_for_template(db_path: str, *, search: str | None = None) -> list[dict]:
     from database import event_time, init_db
 
@@ -219,9 +225,7 @@ class AfishaView(TemplateView):
         context["search_query"] = search
 
         try:
-            from chat import ensure_db
-
-            ensure_db(db_path, force=False)
+            _ensure_afisha_db(db_path)
         except (RuntimeError, ValueError) as e:
             context["events"] = []
             context["page_obj"] = None
@@ -249,9 +253,7 @@ class EventDetailView(TemplateView):
         context["nav_section"] = "afisha"
         db_path = _backend_db_path()
         try:
-            from chat import ensure_db
-
-            ensure_db(db_path, force=False)
+            _ensure_afisha_db(db_path)
         except (RuntimeError, ValueError) as e:
             raise Http404("База афиши недоступна") from e
         event = _event_detail_dict(db_path, int(kwargs["event_id"]))
@@ -278,9 +280,7 @@ class ChatView(TemplateView):
 
             db_path = _backend_db_path()
             try:
-                from chat import ensure_db
-
-                ensure_db(db_path, force=False)
+                _ensure_afisha_db(db_path)
             except (RuntimeError, ValueError):
                 return redirect("assistant:chat")
 
@@ -385,6 +385,9 @@ def local_gigachat_plan(request):
     else:
         request.session[LOCAL_GIGACHAT_SESSION_SLUG_KEY] = slug
         request.session.modified = True
+        if request.user.is_authenticated:
+            request.user.gigachat_plan_slug = slug
+            request.user.save(update_fields=["gigachat_plan_slug"])
     next_url = (request.POST.get("next") or "").strip()
     if not url_has_allowed_host_and_scheme(
         url=next_url,
@@ -493,9 +496,7 @@ def chat_api(request):
 
     db_path = _backend_db_path()
     try:
-        from chat import ensure_db
-
-        ensure_db(db_path, force=False)
+        _ensure_afisha_db(db_path)
     except (RuntimeError, ValueError) as e:
         friendly_msg, err_code = classify_chat_backend_failure(e)
         _append_turn_to_thread(request, chat_id, message, friendly_msg)

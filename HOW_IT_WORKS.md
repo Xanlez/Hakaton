@@ -2,6 +2,8 @@
 
 Описание потоков данных, веб‑чата, GigaChat, ошибок и логов. Инструкции по установке и запуску — в **`DOCUMENTATION.md`**.
 
+Печатная версия: **`docs/HOW_IT_WORKS.docx`**. Пересборка: `python scripts/build_docs_docx.py` (нужен `python-docx`).
+
 ## Общая схема
 
 ```mermaid
@@ -24,7 +26,7 @@ flowchart LR
 1. **`fetch_events.py`** — запрос к `API_URL` из `config.py`, разбор ответа.
 2. **`database.py`** — схема SQLite, сохранение и выборки по событиям.
 3. **`sync_afisha.py`** и **`main.py`** — синхронизация по расписанию или разово (`--once`).
-4. **`chat.py`** экспортирует **`ensure_db`**: при пустой `afisha.db` (или с `force`) подтягивает данные, чтобы сайт и CLI не работали с пустым каталогом.
+4. **`sync_afisha.ensure_db`**: при пустой `afisha.db` (или с `force`) подтягивает данные; вызывается из Django и из CLI **`chat.py`**.
 
 Источник событий для чата и афиши — файл **`afisha.db`** (путь задаётся **`DB_PATH`** в `config.py` / `.env`).
 
@@ -40,7 +42,7 @@ flowchart LR
 
 ### Роль модулей
 
-- **`gigachat_advisor.py`** — промпты, сбор контекста (каталог событий / карточка мероприятия), вызовы SDK **`gigachat`**. Синхронные функции (**`chat_about_event`**, **`recommend_events_with_usage`** и др.) вызывают **`client.chat`**. Для потока в веб‑чате используются **`chat_about_event_stream`** и **`recommend_events_stream`** (итератор фрагментов текста через **`client.stream`** и **`_iter_chat_stream_chunks`**).
+- **`gigachat_advisor.py`** — промпты, сбор контекста (каталог / карточка мероприятия), SDK **`gigachat`**. Веб‑чат: **`chat_about_event_stream`**, **`recommend_events_stream`**; CLI: **`recommend_events`** / **`recommend_events_with_usage`**.
 - Учётные данные SSL и модель по умолчанию — **`config.py`** / **`.env`**.
 
 ### REST API чата: `POST /api/chat/`
@@ -91,7 +93,7 @@ flowchart LR
 - **`ASSISTANT_LOCAL_RELAX_CHAT_LIMITS`**, **`CHAT_LOCAL_MESSAGES_PER_THREAD_MAX`**, **`CHAT_LOCAL_THREADS_MAX`** — более мягкие лимиты для локальных клиентов.
 - **`ASSISTANT_LOCAL_GIGACHAT_BANNER`** — показывать ли блок выбора модели GigaChat в чате при loopback (**`assistant/context_processors.local_gigachat_banner`** + **`assistant/partials/local_gigachat_banner.html`**, сохранение в сессию **`local_gigachat_plan`**).
 
-Для авторизованных пользователей план модели хранится в **`User.gigachat_plan_slug`**, синхронизируется с корректными scope/model через **`assistant/gigachat_plan_prefs.py`** и интерфейс кабинета.
+Для авторизованных пользователей выбор модели в чате (loopback) сохраняется в сессии и в **`User.gigachat_plan_slug`**; пресеты — **`GIGACHAT_PLAN_OPTIONS`** в **`settings.py`**, логика — **`gigachat_plan_prefs.py`**.
 
 ## Логирование
 
@@ -112,10 +114,11 @@ flowchart LR
 
 - **`assistant/auth_views.py`**, **`forms.py`** — вход, регистрация, кабинет, смена плана GigaChat из **`GIGACHAT_PLAN_OPTIONS`** в **`settings.py`**.
 - **`assistant/email_activation.py`** и шаблоны писем — подтверждение регистрации.
+- **Ротация токена ссылки** (`assistant/registration_tokens.py`): в БД хранится только HMAC‑отпечаток секрета; при повторной регистрации на ту же почту, при **`POST /accounts/register/resend/`** и при повторной отправке письма вызывается **`rotate_pending_registration_token`** — старые ссылки из писем перестают работать. Повторная отправка ограничена кэшем (~60 с на адрес). После успешного перехода по ссылке запись **`PendingRegistration`** удаляется (одноразовое использование).
 
 ## Связка «афиша → чат по событию»
 
-Запрос **`/chat/?event=<id>`** создаёт новый поток с **`focus_event_id`**, добавляет первое сообщение помощника через **`introduce_event`** или запасной текст из **`fallback_event_intro`**, редирект на **`/chat/?chat=<thread_id>`**. В промпте для сообщений этого потока используется **`chat_about_event` / `_chat_for_about_event`**.
+Запрос **`/chat/?event=<id>`** создаёт новый поток с **`focus_event_id`**, добавляет первое сообщение помощника через **`introduce_event`** или запасной текст из **`fallback_event_intro`**, редирект на **`/chat/?chat=<thread_id>`**. В промпте для сообщений этого потока используется **`_chat_for_about_event`** / **`chat_about_event_stream`**.
 
 ---
 

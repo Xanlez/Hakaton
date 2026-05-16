@@ -10,15 +10,7 @@ LOCAL_GIGACHAT_SESSION_SLUG_KEY = "assistant_local_gigachat_plan_slug"
 
 
 def plan_options_ordered() -> tuple[dict[str, Any], ...]:
-    opts = getattr(settings, "GIGACHAT_PLAN_OPTIONS", ()) or ()
-    tup = tuple(opts)
-    if not tup:
-        return (
-            {"slug": "gigachat", "label": "GigaChat", "scope": "", "model": "GigaChat"},
-            {"slug": "gigachat-pro", "label": "GigaChat-Pro", "scope": "", "model": "GigaChat-Pro"},
-            {"slug": "gigachat-max", "label": "GigaChat-Max", "scope": "", "model": "GigaChat-Max"},
-        )
-    return tup
+    return tuple(getattr(settings, "GIGACHAT_PLAN_OPTIONS", ()) or ())
 
 
 def allowed_plan_slugs() -> frozenset[str]:
