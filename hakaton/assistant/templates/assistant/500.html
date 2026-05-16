@@ -1,0 +1,21 @@
+{% extends "assistant/base.html" %}
+
+{% block title %}Сервис временно недоступен{% endblock %}
+
+{% block meta_description %}Внутренняя ошибка сервера (500).{% endblock %}
+
+{% block content %}
+<div class="afisha-wrap">
+    <header class="afisha-head">
+        <h1>Внутренняя ошибка сервера</h1>
+        <p class="text-additional">
+            Сейчас не получилось обработать запрос (HTTP&nbsp;500). Попробуйте обновить страницу позже или откройте афишу.
+        </p>
+    </header>
+    <div class="afisha-empty bg-surface">
+        <p class="text-secondary">
+            <a href="{% url 'assistant:afisha' %}">На главную — афиша</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

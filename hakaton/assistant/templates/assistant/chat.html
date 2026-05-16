@@ -63,18 +63,16 @@
                 <h1 id="chat-title" class="chat-main__title text-secondary">
                     {% if active_chat %}{{ active_chat.title }}{% else %}Помощник{% endif %}
                 </h1>
+                {% if not thread_focus_event_id %}
                 <p class="chat-main__subtitle text-additional">
-                    {% if thread_focus_event_id %}
-                        Ответы только по карточке этого мероприятия (дата, место и описание из афиши). Переключение чатов — слева.
+                    {% if user.is_authenticated %}
+                        Общий поиск по афише. Диалоги сохраняются в вашем аккаунте.
                     {% else %}
-                        {% if user.is_authenticated %}
-                            Общий поиск по афише. Диалоги сохраняются в вашем аккаунте.
-                        {% else %}
-                            Общий поиск по афише. Несколько диалогов — слева; без входа история хранится только в сессии браузера.
-                            <a href="{% url 'assistant:cabinet' %}" class="text-primary">Войдите</a>, чтобы сохранять чаты.
-                        {% endif %}
+                        Общий поиск по афише. Несколько диалогов — слева; без входа история хранится только в сессии браузера.
+                        <a href="{% url 'assistant:cabinet' %}" class="text-primary">Войдите</a>, чтобы сохранять чаты.
                     {% endif %}
                 </p>
+                {% endif %}
             </div>
             <div class="chat-main__head-actions chat-main__head-actions--split">
                 <form method="post" action="{{ chat_clear_url }}" class="chat-head-form">
@@ -139,9 +137,7 @@
                         ></textarea>
                         <span id="chat-hint" class="chat-composer__hint text-additional">
                             Enter — отправить, Shift+Enter — новая строка.
-                            {% if thread_focus_event_id %}
-                                Ответы только по карточке этого мероприятия.
-                            {% else %}
+                            {% if not thread_focus_event_id %}
                                 Ответ по полному списку афиши и GigaChat.
                             {% endif %}
                         </span>

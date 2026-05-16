@@ -1,7 +1,7 @@
 # Рекомендации и диалоги по афише через GigaChat
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 from gigachat import GigaChat
 from gigachat.exceptions import AuthenticationError, ForbiddenError, ResponseError
@@ -103,6 +103,28 @@ def _chat_execute(chat_obj: Chat, *, giga_kw: dict[str, Any] | None = None) -> t
     return text, total
 
 
+def _iter_chat_stream_chunks(
+    chat_obj: Chat,
+    *,
+    giga_kw: dict[str, Any] | None = None,
+) -> Iterator[str]:
+    """Фрагменты текста ответа ассистента по мере генерации (stream API GigaChat)."""
+    _require_credentials()
+    with GigaChat(**_giga_options(giga_kw)) as client:
+        for completion_chunk in client.stream(chat_obj):
+            choices = getattr(completion_chunk, "choices", None) or ()
+            for choice in choices:
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                raw = getattr(delta, "content", None)
+                if raw is None or raw == "":
+                    continue
+                if not isinstance(raw, str):
+                    raw = str(raw)
+                yield raw
+
+
 def _one_shot(system: str, user: str, *, giga_kw: dict[str, Any] | None = None) -> tuple[str, int]:
     chat = Chat(messages=[
         Messages(role=MessagesRole.SYSTEM, content=system),
@@ -199,14 +221,14 @@ def introduce_event(
     return _one_shot(system, user, giga_kw=giga_kw)
 
 
-def chat_about_event(
+def _chat_for_about_event(
     user_message: str,
     db_path: str,
     event_id: int,
     history: list[dict],
     *,
     giga_kw: dict[str, Any] | None = None,
-) -> tuple[str, int]:
+) -> Chat:
     row = fetch_event_by_id(db_path, event_id)
     if row is None:
         raise RuntimeError("Событие не найдено")
@@ -232,8 +254,35 @@ def chat_about_event(
             built.append(Messages(role=MessagesRole.ASSISTANT, content=text))
 
     built.append(Messages(role=MessagesRole.USER, content=user_message))
+    return Chat(messages=built)
 
-    return _chat_execute(Chat(messages=built), giga_kw=giga_kw)
+
+def chat_about_event(
+    user_message: str,
+    db_path: str,
+    event_id: int,
+    history: list[dict],
+    *,
+    giga_kw: dict[str, Any] | None = None,
+) -> tuple[str, int]:
+    chat = _chat_for_about_event(
+        user_message, db_path, event_id, history, giga_kw=giga_kw
+    )
+    return _chat_execute(chat, giga_kw=giga_kw)
+
+
+def chat_about_event_stream(
+    user_message: str,
+    db_path: str,
+    event_id: int,
+    history: list[dict],
+    *,
+    giga_kw: dict[str, Any] | None = None,
+) -> Iterator[str]:
+    chat = _chat_for_about_event(
+        user_message, db_path, event_id, history, giga_kw=giga_kw
+    )
+    yield from _iter_chat_stream_chunks(chat, giga_kw=giga_kw)
 
 
 def suggest_chat_title(conversation_excerpt: str, event_name_hint: str | None) -> str:
@@ -250,12 +299,12 @@ def suggest_chat_title(conversation_excerpt: str, event_name_hint: str | None) -
     return (line[:56] + "…") if len(line) > 56 else line
 
 
-def recommend_events_with_usage(
+def _chat_for_catalog_recommend(
     query: str,
-    db_path: str = DB_PATH,
+    db_path: str,
     *,
     giga_kw: dict[str, Any] | None = None,
-) -> tuple[str, int]:
+) -> Chat:
     conn = init_db(db_path)
     rows = load_catalog(conn)
     conn.close()
@@ -267,12 +316,30 @@ def recommend_events_with_usage(
 
     text = f"Список ({len(rows)}):\n{catalog_text(rows)}\n\nЗапрос: {query}"
     system = SYSTEM_LOCAL_SIMPLE_LLM if _local_llm_simple(giga_kw) else SYSTEM_PROMPT
-    chat = Chat(messages=[
+    return Chat(messages=[
         Messages(role=MessagesRole.SYSTEM, content=system),
         Messages(role=MessagesRole.USER, content=text),
     ])
 
+
+def recommend_events_with_usage(
+    query: str,
+    db_path: str = DB_PATH,
+    *,
+    giga_kw: dict[str, Any] | None = None,
+) -> tuple[str, int]:
+    chat = _chat_for_catalog_recommend(query, db_path, giga_kw=giga_kw)
     return _chat_execute(chat, giga_kw=giga_kw)
+
+
+def recommend_events_stream(
+    query: str,
+    db_path: str = DB_PATH,
+    *,
+    giga_kw: dict[str, Any] | None = None,
+) -> Iterator[str]:
+    chat = _chat_for_catalog_recommend(query, db_path, giga_kw=giga_kw)
+    yield from _iter_chat_stream_chunks(chat, giga_kw=giga_kw)
 
 
 def recommend_events(query: str, db_path: str = DB_PATH) -> str:

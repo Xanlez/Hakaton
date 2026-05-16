@@ -1,0 +1,24 @@
+{% extends "assistant/base.html" %}
+
+{% block title %}Страница не найдена{% endblock %}
+
+{% block meta_description %}Запрошенная страница отсутствует.{% endblock %}
+
+{% block content %}
+<div class="afisha-wrap">
+    <header class="afisha-head">
+        <h1>Страница не найдена</h1>
+        <p class="text-additional">
+            По адресу <span class="text-secondary">{{ path }}</span> ничего нет (код ошибки HTTP 404).
+            Проверьте адрес или перейдите на афишу.
+        </p>
+    </header>
+    <div class="afisha-empty bg-surface">
+        <p class="text-secondary">
+            <a href="{% url 'assistant:afisha' %}">Открыть афишу</a>
+            &nbsp;·&nbsp;
+            <a href="{% url 'assistant:chat' %}">Открыть чат</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

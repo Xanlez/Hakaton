@@ -1,5 +1,5 @@
 /**
- * Чат: POST на URL из data-chat-api (совпадает с логикой python chat.py / gigachat_advisor).
+ * Чат: POST на api/chat — ответ всегда NDJSON-поток (delta / done / error), кроме ранней ошибки (JSON).
  */
 (function () {
     const form = document.getElementById("chat-form");
@@ -48,6 +48,134 @@
             messagesRoot.appendChild(thread);
         }
         return thread;
+    }
+
+    function consumeNdjsonResponse(res, loadingBubble) {
+        loadingBubble.textContent = "";
+        loadingBubble.classList.remove("chat-msg__bubble--rich");
+
+        function applyLine(rawLine) {
+            const line = rawLine.replace(/\r$/, "").trim();
+            if (!line) {
+                return;
+            }
+            let obj;
+            try {
+                obj = JSON.parse(line);
+            } catch (ignore) {
+                return;
+            }
+            if (obj.type === "delta" && obj.text) {
+                loadingBubble.textContent += obj.text;
+            } else if (obj.type === "done") {
+                if (obj.reply_html) {
+                    loadingBubble.classList.add("chat-msg__bubble--rich");
+                    loadingBubble.innerHTML = obj.reply_html;
+                } else {
+                    loadingBubble.textContent = obj.reply || "";
+                }
+            } else if (obj.type === "error") {
+                if (obj.reply_html) {
+                    loadingBubble.classList.add("chat-msg__bubble--rich");
+                    loadingBubble.innerHTML = obj.reply_html;
+                } else {
+                    loadingBubble.textContent =
+                        obj.message || "Не удалось получить ответ.";
+                }
+            }
+            messagesRoot.scrollTop = messagesRoot.scrollHeight;
+        }
+
+        function parseAllFromText(full) {
+            full.split(/\n/).forEach(function (segment) {
+                applyLine(segment);
+            });
+        }
+
+        let cloned = null;
+        try {
+            cloned = typeof res.clone === "function" ? res.clone() : null;
+        } catch (ignore) {
+            cloned = null;
+        }
+
+        const reader =
+            res.body && typeof res.body.getReader === "function"
+                ? res.body.getReader()
+                : null;
+
+        if (!reader) {
+            return res.text().then(parseAllFromText);
+        }
+
+        const decoder = new TextDecoder("utf-8");
+        let buf = "";
+
+        function pump() {
+            return reader
+                .read()
+                .then(function (chunk) {
+                    if (chunk.done) {
+                        if (buf.replace(/\s/g, "").length) {
+                            parseAllFromText(buf);
+                            buf = "";
+                        }
+                        return undefined;
+                    }
+                    try {
+                        buf += decoder.decode(chunk.value, { stream: true });
+                    } catch (ignore) {
+                        if (cloned) {
+                            return cloned.text().then(parseAllFromText);
+                        }
+                        throw new Error("Ошибка разбора ответа (UTF-8).");
+                    }
+                    let nl;
+                    while ((nl = buf.indexOf("\n")) >= 0) {
+                        const line = buf.slice(0, nl);
+                        buf = buf.slice(nl + 1);
+                        applyLine(line);
+                    }
+                    return pump();
+                })
+                .catch(function () {
+                    if (cloned) {
+                        return cloned.text().then(parseAllFromText);
+                    }
+                    return res.text().then(parseAllFromText);
+                });
+        }
+
+        return pump();
+    }
+
+    function showHttpErrorBubble(loadingBubble, res, rawBody) {
+        let body = null;
+        try {
+            body = rawBody ? JSON.parse(rawBody) : null;
+        } catch (ignore) {
+            body = null;
+        }
+        let errText = "Не удалось получить ответ.";
+        if (body && (body.error || body.message)) {
+            errText = body.error || body.message;
+            if (body.reply_html) {
+                loadingBubble.classList.add("chat-msg__bubble--rich");
+                loadingBubble.innerHTML = body.reply_html;
+                return;
+            }
+        } else if (rawBody && rawBody.trim()) {
+            errText =
+                "Ошибка " +
+                res.status +
+                ": " +
+                rawBody.trim().substring(0, 280);
+        } else {
+            errText =
+                "Ошибка " + res.status + " " + (res.statusText || "").trim();
+        }
+        loadingBubble.textContent = errText || "Не удалось получить ответ.";
+        messagesRoot.scrollTop = messagesRoot.scrollHeight;
     }
 
     function appendMessage(role, text, timeStr, options) {
@@ -116,35 +244,30 @@
             headers: {
                 "Content-Type": "application/json",
                 "X-CSRFToken": token,
+                Accept: "application/x-ndjson, application/json",
             },
             body: JSON.stringify({ message: text, chat_id: chatId }),
         })
             .then(function (res) {
-                return res.json().then(function (body) {
-                    return { ok: res.ok, body: body };
+                if (res.ok) {
+                    return consumeNdjsonResponse(res, loadingBubble);
+                }
+                return res.text().then(function (raw) {
+                    showHttpErrorBubble(loadingBubble, res, raw);
                 });
             })
-            .then(function (r) {
-                if (r.ok && r.body.reply !== undefined) {
-                    if (r.body.reply_html) {
-                        loadingBubble.classList.add("chat-msg__bubble--rich");
-                        loadingBubble.innerHTML = r.body.reply_html;
-                    } else {
-                        loadingBubble.textContent = r.body.reply;
-                    }
-                } else {
-                    const errText =
-                        r.body.error || "Не удалось получить ответ.";
-                    if (r.body.reply_html) {
-                        loadingBubble.classList.add("chat-msg__bubble--rich");
-                        loadingBubble.innerHTML = r.body.reply_html;
-                    } else {
-                        loadingBubble.textContent = errText;
-                    }
+            .catch(function (err) {
+                let msg = "";
+                if (err && typeof err.message === "string") {
+                    msg = err.message.trim();
                 }
-            })
-            .catch(function () {
-                loadingBubble.textContent = "Ошибка сети. Проверьте соединение.";
+                if (!msg && err != null && err !== undefined) {
+                    msg = String(err).trim();
+                }
+                loadingBubble.textContent =
+                    msg ||
+                    "Не удалось прочитать ответ сервера. Проверьте соединение.";
+                messagesRoot.scrollTop = messagesRoot.scrollHeight;
             })
             .finally(function () {
                 submit.disabled = !input.value.trim();

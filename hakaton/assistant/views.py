@@ -4,7 +4,13 @@ from pathlib import Path
 
 from django.contrib import messages
 from django.core.paginator import Paginator
-from django.http import Http404, HttpResponseForbidden, HttpResponseRedirect, JsonResponse
+from django.http import (
+    Http404,
+    HttpResponseForbidden,
+    HttpResponseRedirect,
+    JsonResponse,
+    StreamingHttpResponse,
+)
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
@@ -24,6 +30,10 @@ from assistant.chat_storage import (
 )
 from assistant.chat_threads import finalize_thread_title, last_time_label, thread_preview
 from assistant.formatting import assistant_reply_html, clean_assistant_visible
+from assistant.gigachat_errors import (
+    classify_chat_backend_failure,
+    ndjson_chat_error_line_bytes,
+)
 from assistant.gigachat_plan_prefs import (
     LOCAL_GIGACHAT_SESSION_SLUG_KEY,
     allowed_plan_slugs,
@@ -144,28 +154,55 @@ def _chat_time_labels() -> tuple[str, str]:
     return label, label
 
 
-def _append_turn_to_thread(request, thread_id: str, user_text: str, assistant_text: str) -> None:
+def _trim_thread_tail(msgs: list, request) -> None:
+    msg_cap, _ = get_chat_limits_for_request(request)
+    overflow = len(msgs) - msg_cap
+    if overflow > 0:
+        del msgs[:overflow]
+
+
+def _touch_thread_recent(state: dict, thread_id: str) -> None:
+    state["order"] = [thread_id] + [x for x in state["order"] if x != thread_id]
+    state["active_id"] = thread_id
+
+
+def _append_user_turn(request, thread_id: str, user_text: str) -> None:
     state = get_chat_state(request)
     if thread_id not in state["threads"]:
         return
     thread = state["threads"][thread_id]
     msgs = list(thread.get("messages") or [])
-    tu, ta = _chat_time_labels()
+    tu, _ta = _chat_time_labels()
     msgs.append({"role": "user", "text": user_text, "time": tu})
+    _trim_thread_tail(msgs, request)
+    thread["messages"] = msgs
+    _touch_thread_recent(state, thread_id)
+    trim_chat_threads_for_request(request, state)
+    save_chat_state(request, state)
+
+
+def _append_assistant_turn(request, thread_id: str, assistant_text: str) -> None:
+    state = get_chat_state(request)
+    if thread_id not in state["threads"]:
+        return
+    thread = state["threads"][thread_id]
+    msgs = list(thread.get("messages") or [])
+    _tu, ta = _chat_time_labels()
     clean_ai = (
         clean_assistant_visible(assistant_text) if (assistant_text or "").strip() else assistant_text
     )
     msgs.append({"role": "assistant", "text": clean_ai, "time": ta})
-    msg_cap, _ = get_chat_limits_for_request(request)
-    overflow = len(msgs) - msg_cap
-    if overflow > 0:
-        msgs = msgs[overflow:]
+    _trim_thread_tail(msgs, request)
     thread["messages"] = msgs
     finalize_thread_title(thread, msgs)
-    state["order"] = [thread_id] + [x for x in state["order"] if x != thread_id]
-    state["active_id"] = thread_id
+    _touch_thread_recent(state, thread_id)
     trim_chat_threads_for_request(request, state)
     save_chat_state(request, state)
+
+
+def _append_turn_to_thread(request, thread_id: str, user_text: str, assistant_text: str) -> None:
+    _append_user_turn(request, thread_id, user_text)
+    _append_assistant_turn(request, thread_id, assistant_text)
 
 
 AFISHA_PAGE_SIZE = 12
@@ -348,7 +385,6 @@ def local_gigachat_plan(request):
     else:
         request.session[LOCAL_GIGACHAT_SESSION_SLUG_KEY] = slug
         request.session.modified = True
-        messages.success(request, "Выбрана модель GigaChat для локального доступа (сессия).")
     next_url = (request.POST.get("next") or "").strip()
     if not url_has_allowed_host_and_scheme(
         url=next_url,
@@ -359,22 +395,101 @@ def local_gigachat_plan(request):
     return HttpResponseRedirect(next_url)
 
 
+def _chat_stream_ndjson_response(
+    request,
+    chat_id: str,
+    message: str,
+    db_path: str,
+    *,
+    focus,
+    prior: list[dict],
+) -> StreamingHttpResponse:
+    """NDJSON: каждая строка — объект JSON с ключом «type»: delta | done | error."""
+    gk = gigachat_client_kw_for_request(request)
+
+    try:
+        if focus is not None:
+            from gigachat_advisor import chat_about_event_stream
+
+            chunks = chat_about_event_stream(
+                message, db_path, int(focus), prior, giga_kw=gk
+            )
+        else:
+            from gigachat_advisor import recommend_events_stream
+
+            chunks = recommend_events_stream(message, db_path, giga_kw=gk)
+    except Exception as e:
+        logger.exception("chat_api stream init")
+        friendly_msg, _code = classify_chat_backend_failure(e)
+        _append_turn_to_thread(request, chat_id, message, friendly_msg)
+        one = ndjson_chat_error_line_bytes(e)
+        resp = StreamingHttpResponse(iter([one]), content_type="application/x-ndjson; charset=utf-8")
+        resp["Cache-Control"] = "no-store"
+        resp["X-Accel-Buffering"] = "no"
+        return resp
+
+    def ndjson_chunks():
+        _append_user_turn(request, chat_id, message)
+        acc = ""
+        try:
+            for frag in chunks:
+                acc += frag
+                yield (
+                    json.dumps({"type": "delta", "text": frag}, ensure_ascii=False) + "\n"
+                ).encode("utf-8")
+            raw = acc.strip()
+            if not raw:
+                raise RuntimeError("Пустой ответ модели")
+            clean = clean_assistant_visible(raw)
+            _append_assistant_turn(request, chat_id, clean)
+            yield (
+                json.dumps(
+                    {
+                        "type": "done",
+                        "reply": clean,
+                        "reply_html": str(assistant_reply_html(clean)),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+        except Exception as e:
+            logger.exception("chat_api stream consume")
+            friendly_msg, _code = classify_chat_backend_failure(e)
+            _append_assistant_turn(request, chat_id, friendly_msg)
+            yield ndjson_chat_error_line_bytes(e)
+
+    resp = StreamingHttpResponse(ndjson_chunks(), content_type="application/x-ndjson; charset=utf-8")
+    resp["Cache-Control"] = "no-store"
+    resp["X-Accel-Buffering"] = "no"
+    return resp
+
+
 @require_POST
 def chat_api(request):
     try:
         data = json.loads(request.body.decode("utf-8") or "{}")
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Неверный JSON"}, status=400)
+        return JsonResponse(
+            {"error": "Неверный JSON.", "code": "invalid_json"},
+            status=400,
+        )
 
     message = (data.get("message") or "").strip()
     chat_id = (data.get("chat_id") or "").strip()
 
     state = get_chat_state(request)
     if not chat_id or chat_id not in state["threads"]:
-        return JsonResponse({"error": "Неизвестный чат"}, status=400)
+        return JsonResponse(
+            {"error": "Неизвестный чат или сессия устарела. Обновите страницу или откройте чат заново.", "code": "unknown_chat"},
+            status=404,
+        )
 
     if not message:
-        return JsonResponse({"error": "Введите вопрос"}, status=400)
+        return JsonResponse(
+            {"error": "Введите текст вопроса.", "code": "empty_message"},
+            status=400,
+        )
 
     db_path = _backend_db_path()
     try:
@@ -382,54 +497,33 @@ def chat_api(request):
 
         ensure_db(db_path, force=False)
     except (RuntimeError, ValueError) as e:
-        err_msg = str(e)
-        _append_turn_to_thread(request, chat_id, message, err_msg)
-        clean_err = clean_assistant_visible(err_msg)
+        friendly_msg, err_code = classify_chat_backend_failure(e)
+        _append_turn_to_thread(request, chat_id, message, friendly_msg)
+        clean_err = clean_assistant_visible(friendly_msg)
         return JsonResponse(
             {
                 "error": clean_err,
                 "reply": clean_err,
                 "reply_html": str(assistant_reply_html(clean_err)),
+                "code": err_code,
             },
             status=400,
         )
 
-    try:
-        focus = state["threads"][chat_id].get("focus_event_id")
-        prior = [
-            {"role": m["role"], "text": m["text"]}
-            for m in state["threads"][chat_id].get("messages", [])
-        ]
-        if focus is not None:
-            from gigachat_advisor import chat_about_event
+    focus = state["threads"][chat_id].get("focus_event_id")
+    prior = [
+        {"role": m["role"], "text": m["text"]}
+        for m in state["threads"][chat_id].get("messages", [])
+    ]
 
-            gk = gigachat_client_kw_for_request(request)
-            reply, _ = chat_about_event(message, db_path, int(focus), prior, giga_kw=gk)
-        else:
-            from gigachat_advisor import recommend_events_with_usage
-
-            gk = gigachat_client_kw_for_request(request)
-            reply, _ = recommend_events_with_usage(message, db_path, giga_kw=gk)
-    except Exception as e:
-        logger.exception("chat_api")
-        err_msg = str(e)
-        _append_turn_to_thread(request, chat_id, message, err_msg)
-        clean_err = clean_assistant_visible(err_msg)
-        return JsonResponse(
-            {
-                "error": clean_err,
-                "reply": clean_err,
-                "reply_html": str(assistant_reply_html(clean_err)),
-            },
-            status=500,
-        )
-
-    clean = clean_assistant_visible(reply)
-    _append_turn_to_thread(request, chat_id, message, clean)
-    return JsonResponse({
-        "reply": clean,
-        "reply_html": str(assistant_reply_html(clean)),
-    })
+    return _chat_stream_ndjson_response(
+        request,
+        chat_id,
+        message,
+        db_path,
+        focus=focus,
+        prior=prior,
+    )
 
 
 @require_POST

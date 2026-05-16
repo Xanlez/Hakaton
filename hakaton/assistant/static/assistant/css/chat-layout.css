@@ -450,6 +450,21 @@ html.page-chat.v-theme--light .app-main {
     --chat-rich-icon-gap: 0.5rem;
 }
 
+.chat-rich-inner > *:first-child {
+    margin-top: 0;
+}
+
+.chat-rich__primary {
+    margin: 0 0 0.5em;
+    padding-bottom: 0.35em;
+    font-size: 1.1875rem;
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    color: rgb(var(--v-theme-secondary));
+    border-bottom: 1px solid rgba(var(--v-theme-border-color), 0.58);
+}
+
 .chat-rich__title {
     margin: 0 0 0.35em;
     font-size: 1.0625rem;

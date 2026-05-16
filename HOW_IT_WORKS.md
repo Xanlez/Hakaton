@@ -1,17 +1,17 @@
 # Как устроен проект
 
-Краткое описание потоков данных и ролей модулей без дублирования инструкций по установке (они в `DOCUMENTATION.md`).
+Описание потоков данных, веб‑чата, GigaChat, ошибок и логов. Инструкции по установке и запуску — в **`DOCUMENTATION.md`**.
 
 ## Общая схема
 
 ```mermaid
 flowchart LR
-  API["API Sirius\n(pro.sirius-ft.ru)"]
-  SYNC["sync_afisha\n+ fetch_events"]
-  AFISHA_DB[("afisha.db\nсобытия")]
+  API["API Sirius"]
+  SYNC["sync / main"]
+  AFISHA_DB[("afisha.db")]
   DJANGO["Django assistant"]
-  ORM_DB[("db.sqlite3\nusers + чаты")]
-  GIGA["gigachat_advisor\nGigaChat API"]
+  ORM_DB[("db.sqlite3")]
+  GIGA["GigaChat API"]
 
   API --> SYNC --> AFISHA_DB
   AFISHA_DB --> DJANGO
@@ -21,52 +21,102 @@ flowchart LR
 
 ## Загрузка афиши
 
-1. **`fetch_events.py`** — HTTP POST к `API_URL` из `config.py`, разбор JSON.
-2. **`database.py`** — создание таблиц при необходимости, сохранение и выборка событий (время, описание, место и т.д.).
-3. **`sync_afisha.py`** — объединяет загрузку и запись: `fetch` → `parse_events` → `save_events`.
-4. **`main.py`** — CLI: один запуск или цикл с паузой.
-5. **`chat.py`** — функция **`ensure_db`**: если в `afisha.db` нет событий (или передан `force`), вызывается **`sync`**, чтобы сайт и консольный чат не работали с пустой базой.
+1. **`fetch_events.py`** — запрос к `API_URL` из `config.py`, разбор ответа.
+2. **`database.py`** — схема SQLite, сохранение и выборки по событиям.
+3. **`sync_afisha.py`** и **`main.py`** — синхронизация по расписанию или разово (`--once`).
+4. **`chat.py`** экспортирует **`ensure_db`**: при пустой `afisha.db` (или с `force`) подтягивает данные, чтобы сайт и CLI не работали с пустым каталогом.
 
-Итог: **источник истины по мероприятиям** — локальный файл **`afisha.db`** в корне (или путь из `DB_PATH`).
+Источник событий для чата и афиши — файл **`afisha.db`** (путь задаётся **`DB_PATH`** в `config.py` / `.env`).
 
-## Django и доступ к афише из веба
+## Интеграция Django и корня репозитория
 
-- В **`hakaton/hakaton/settings.py`** в `sys.path` добавляется **родительский каталог** репозитория (`REPO_ROOT`). Поэтому из-под Django можно импортировать модули из корня: `config`, `database`, `chat`, `gigachat_advisor`.
-- **`assistant/views.py`** вычисляет путь к БД афиши через `config.DB_PATH` относительно корня репозитория.
-- Страницы афиши и карточки события читают строки из SQLite через **`database.init_db`** и SQL-запросы; перед этим при необходимости вызывается **`ensure_db`**.
+В **`hakaton/hakaton/settings.py`** в `sys.path` добавляется **`REPO_ROOT`** (родитель каталога `hakaton/`). Отсюда импортируются модули из корня репозитория: **`config`**, **`database`**, **`chat`**, **`gigachat_advisor`**.
 
-Маршруты задаются в **`assistant/urls.py`** и подключаются из **`hakaton/urls.py`** на корень сайта.
+**`assistant/views.py`** через `config.DB_PATH` находит файл афиши и передаёт путь в `database` и `gigachat_advisor`.
+
+Маршруты: **`assistant/urls.py`**, корневое подключение в **`hakaton/urls.py`**. Обработчики **`handler404`** / **`handler500`** — в **`assistant/error_views.py`**, страницы **`assistant/templates/assistant/404.html`** и **`500.html`**.
 
 ## Чат и GigaChat
 
-- **`gigachat_advisor.py`** — обёртка над SDK GigaChat: системные промпты, формат «карточки» события, функции **рекомендаций по всей афише** и **диалога про одно событие**, вводное сообщение при открытии чата с мероприятиями.
-- Учётные данные и опции SSL берутся из **`config.py`** (в т.ч. из `.env`).
-- **`assistant/views.py`**:
-  - **`chat_api`** принимает JSON (`message`, `chat_id`), поднимает состояние чата, при наличии **`focus_event_id`** у потока вызывает **`chat_about_event`**, иначе **`recommend_events`**.
-  - Ответы проходят через **`formatting.clean_assistant_visible`** и **`assistant_reply_html`** для безопасного вывода в HTML.
+### Роль модулей
 
-Фронт чата: шаблон **`assistant/chat.html`** и **`static/assistant/js/chat.js`** (запросы на `api/chat/`).
+- **`gigachat_advisor.py`** — промпты, сбор контекста (каталог событий / карточка мероприятия), вызовы SDK **`gigachat`**. Синхронные функции (**`chat_about_event`**, **`recommend_events_with_usage`** и др.) вызывают **`client.chat`**. Для потока в веб‑чате используются **`chat_about_event_stream`** и **`recommend_events_stream`** (итератор фрагментов текста через **`client.stream`** и **`_iter_chat_stream_chunks`**).
+- Учётные данные SSL и модель по умолчанию — **`config.py`** / **`.env`**.
 
-## Хранение чатов (сессия и ORM)
+### REST API чата: `POST /api/chat/`
 
-Модуль **`assistant/chat_storage.py`**:
+Реализовано в **`assistant/views`** как **`chat_api`**.
 
-- Для **гостей**: состояние многопоточного чата лежит в **сессии Django** (`assistant_chat_state_v2`). Есть лимиты на число потоков и сообщений в потоке.
-- Для **авторизованных пользователей**: то же состояние представлено моделями **`ChatThread`** и **`ChatMessage`** в **`assistant/models.py`** (таблицы в **`hakaton/db.sqlite3`**). При каждом сохранении выполняется синхронизация dict-состояния с БД (`sync_state_to_database`).
-- При **входе** **`merge_guest_session_into_user`** переносит гостевые чаты в аккаунт, если во время сессии что-то успели написать.
+Тело запроса — JSON:
 
-Заголовки вкладок и превью обрабатываются в **`assistant/chat_threads.py`**.
+- **`message`** — текст пользователя;
+- **`chat_id`** — идентификатор потока из боковой панели.
 
-## Регистрация и активация
+Успешный сценарий после проверки сессии и **`ensure_db`**: ответ **`Content-Type: application/x-ndjson`**, поток строк **UTF‑8**, каждая строка — один JSON‑объект:
 
-- **`assistant/auth_views.py`** — формы входа/регистрации, выход, кабинет, активация по ссылке.
-- **`assistant/email_activation.py`** — генерация токена и отправка письма.
-- Новый пользователь создаётся **неактивным** (`is_active=False`) до перехода по ссылке активации.
+| `type`   | Назначение |
+|----------|------------|
+| `delta`  | Фрагмент текста ассистента (`text`). |
+| `done`   | Конец генерации; поля **`reply`** (очищенный текст), **`reply_html`** (безопасный HTML для пузырька). |
+| `error`  | Ошибка; **`message`**, **`code`** (см. ниже), **`reply_html`** для показа в UI. |
 
-## Связь «открыть чат с мероприятия»
+Поток строится в **`_chat_stream_ndjson_response`**: генератор сохранения сначала фиксирует сообщение пользователя (**`_append_user_turn`**), затем стримит дельты, после полного текста сохраняет ответ помощника (**`_append_assistant_turn`**). При ошибке до стрима — одна строка `error`; при ошибке в середине генерации пользователь уже в истории, дописывается ответ помощника с текстом ошибки.
 
-Переход на **`/chat/?event=<id>`** создаёт новый поток с **`focus_event_id`**, запрашивает у **`introduce_event`** (или запасной текст) первое сообщение ассистента и перенаправляет на **`/chat/?chat=<thread_id>`**.
+Фронт: **`assistant/static/assistant/js/chat.js`** — `fetch` с чтением тела через **`ReadableStream`** (с запасным путём **`response.clone().text()`** при сбое чтения потока), разбор строк NDJSON и подстановка итогового **`reply_html`**.
+
+Статусы **JSON** (не поток): неверный JSON, пустое сообщение, неизвестный **`chat_id`** (часть сценариев с **404** и полем **`code`**, см. код), ошибка **`ensure_db`** (**400**, **`code`** в теле ответа).
+
+### Оформление ответов
+
+**`assistant/formatting.py`**:
+
+- **`clean_assistant_visible`** — убирает служебные упоминания id событий из «сырых» ответов.
+- **`assistant_reply_html`** — мини‑markdown в безопасный HTML: заголовки **`#` / `##` / `###`** (регулярка с пробелом после решёток), параграфы, жирное **`**...**`**, блоки **`**Когда:**` / **`**Где:**`** с дополнительными классами. Стили — **`assistant/static/assistant/css/chat-layout.css`** (классы **`chat-rich_*`**).
+
+### Ошибки GigaChat и сети
+
+**`assistant/gigachat_errors.py`** централизует **`classify_chat_backend_failure(exc)`** → понятное сообщение пользователю и строка **`code`** (`upstream_timeout`, `gigachat_auth`, `http_429`, …). Обрабатываются типичные исключения **`httpx`** (таймаут, соединение, обрыв), классы **`gigachat.exceptions`** (401/403/404/429/5xx и т.д.), **`RuntimeError`** (нет ключей в `.env`, пустой ответ модели и т.п.), **`ValueError`**. В **`DEBUG=True`** часть ошибок дополняется краткой технической вставкой для разработки.
+
+**`ndjson_chat_error_line_bytes(exc)`** формирует одну строку потока `error` с **`reply_html`**.
+
+В журнал записывается полный traceback через **`logger.exception`** в представлениях; пользователю отдаётся уже классифицированное сообщение.
+
+## Локальный доступ (loopback) и выбор модели
+
+В **`assistant/local_request.py`** определяется, является ли клиент локальным (**`REMOTE_ADDR`** 127.0.0.1 / ::1 и т.д.).
+
+Настройки в **`settings.py`** (можно переопределить через **`.env`**):
+
+- **`ASSISTANT_LOCAL_LL_SIMPLE`** — упрощённый системный промпт «как универсальный диалог», если запрос локальный и не отключено иначе.
+- **`ASSISTANT_LOCAL_RELAX_CHAT_LIMITS`**, **`CHAT_LOCAL_MESSAGES_PER_THREAD_MAX`**, **`CHAT_LOCAL_THREADS_MAX`** — более мягкие лимиты для локальных клиентов.
+- **`ASSISTANT_LOCAL_GIGACHAT_BANNER`** — показывать ли блок выбора модели GigaChat в чате при loopback (**`assistant/context_processors.local_gigachat_banner`** + **`assistant/partials/local_gigachat_banner.html`**, сохранение в сессию **`local_gigachat_plan`**).
+
+Для авторизованных пользователей план модели хранится в **`User.gigachat_plan_slug`**, синхронизируется с корректными scope/model через **`assistant/gigachat_plan_prefs.py`** и интерфейс кабинета.
+
+## Логирование
+
+- **`assistant/logging_user.py`** — middleware **`AttachUserLoggingContextMiddleware`** (после аутентификации): в **`contextvars`** кладётся строка пользователя для лог‑записей; фильтр **`UserLoggingFilter`** добавляет в запись поле **`user_repr`** (вне HTTP‑запроса — **`"-"`**).
+- В **`settings.py`** задан объект **`LOGGING`**: формат строки консоли/файла с **`user_repr`**, ротация файла через **`DJANGO_LOG_FILE`** (по умолчанию **`hakaton/logs/django.log`**), параметры **`DJANGO_LOG_MAX_BYTES`**, **`DJANGO_LOG_BACKUP_COUNT`**. Уровень: **`DJANGO_LOG_LEVEL`** или **`LOG_LEVEL`**.
+
+## Хранение чатов
+
+**`assistant/chat_storage.py`**:
+
+- Состояние списков потоков и сообщений в сессии (**`assistant_chat_state_v2`** и связанные ключи).
+- Для **`request.user.is_authenticated`** при сохранении вызывается **`sync_state_to_database`** → модели **`ChatThread`** и **`ChatMessage`** в **`hakaton/db.sqlite3`**.
+- **`merge_guest_session_into_user`** переносит гостевые чаты при входе.
+
+Заголовки и превью — **`assistant/chat_threads.py`** (в т.ч. **`suggest_chat_title`** через GigaChat).
+
+## Регистрация и кабинет
+
+- **`assistant/auth_views.py`**, **`forms.py`** — вход, регистрация, кабинет, смена плана GigaChat из **`GIGACHAT_PLAN_OPTIONS`** в **`settings.py`**.
+- **`assistant/email_activation.py`** и шаблоны писем — подтверждение регистрации.
+
+## Связка «афиша → чат по событию»
+
+Запрос **`/chat/?event=<id>`** создаёт новый поток с **`focus_event_id`**, добавляет первое сообщение помощника через **`introduce_event`** или запасной текст из **`fallback_event_intro`**, редирект на **`/chat/?chat=<thread_id>`**. В промпте для сообщений этого потока используется **`chat_about_event` / `_chat_for_about_event`**.
 
 ---
 
-Если нужно развивать проект: новые поля афиши — в **`database.py`** и парсере **`fetch_events.parse_events`**; новые страницы — в **`assistant/views.py`** и шаблонах; изменение поведения модели — в **`gigachat_advisor.py`** (промпты и сбор контекста).
+**Куда править поведение:** новые поля афиши — **`database.py`** и **`fetch_events`** / **`sync`**; промпты и контекст GigaChat — **`gigachat_advisor.py`**; тексты ошибок пользователю — **`assistant/gigachat_errors.py`**; страницы и роутинг — **`assistant/views.py`**, шаблоны и статика в **`assistant/templates`** / **`assistant/static`**.

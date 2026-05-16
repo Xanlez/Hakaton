@@ -31,6 +31,23 @@ GIGACHAT_CA_BUNDLE_FILE=
 GIGACHAT_VERIFY_SSL_CERTS=true
 ```
 
+### Логи Django (файл + консоль)
+
+По умолчанию включена ротация лог‑файла с подстановкой активного пользователя в каждую запись (`user_repr`; для гостя — аноним / ID сессии). Путь можно переопределить:
+
+```env
+DJANGO_LOG_LEVEL=INFO
+# или совместимо: LOG_LEVEL=INFO
+
+DJANGO_LOG_FILE=logs/django.log
+DJANGO_LOG_MAX_BYTES=5242880
+DJANGO_LOG_BACKUP_COUNT=5
+```
+
+Путь задаётся относительно каталога `hakaton/` (где лежит `manage.py`). Каталог для файла создаётся автоматически.
+
+Ответ **`POST /api/chat/`** всегда отдаётся **потоком** (`application/x-ndjson`): по мере генерации приходят фрагменты текста, затем финальное HTML‑содержимое пузырька или ошибка с полем **`code`**. Контракт и обработка сбоев GigaChat описаны в **`HOW_IT_WORKS.md`**.
+
 Параметры загрузки афиши и путь к файлу БД афиши задаются в `config.py` (`API_URL`, `DB_PATH`, `SYNC_INTERVAL_SEC`). По умолчанию файл БД — `afisha.db` в корне проекта.
 
 ## Запуск веб-приложения (Django)

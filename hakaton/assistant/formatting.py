@@ -68,14 +68,19 @@ def assistant_reply_html(text: str):
         b = block.strip()
         if not b:
             continue
-        if b.startswith("## ") and not b.startswith("### "):
-            title = html.escape(b[3:].strip())
-            chunks.append(f'<h3 class="chat-rich__title">{title}</h3>')
-            continue
-        if b.startswith("### "):
-            title = html.escape(b[4:].strip())
-            chunks.append(f'<h4 class="chat-rich__subtitle">{title}</h4>')
-            continue
+        hm = re.match(r"^(#{1,6})\s+(.+)$", b, re.DOTALL)
+        if hm:
+            level = len(hm.group(1))
+            raw_title = hm.group(2).strip().split("\n", 1)[0].strip()
+            if raw_title:
+                title = html.escape(raw_title)
+                if level <= 1:
+                    chunks.append(f'<h2 class="chat-rich__primary">{title}</h2>')
+                elif level == 2:
+                    chunks.append(f'<h3 class="chat-rich__title">{title}</h3>')
+                else:
+                    chunks.append(f'<h4 class="chat-rich__subtitle">{title}</h4>')
+                continue
         escaped = html.escape(b)
         escaped = _apply_bold_segments(escaped)
         escaped = escaped.replace("\n", "<br>")
